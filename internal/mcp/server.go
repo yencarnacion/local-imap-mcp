@@ -39,6 +39,10 @@ type callParams struct {
 	Arguments json.RawMessage `json:"arguments"`
 }
 
+type initializeParams struct {
+	ProtocolVersion string `json:"protocolVersion"`
+}
+
 func NewServer(runner *ToolRunner) *Server {
 	return &Server{runner: runner}
 }
@@ -86,7 +90,7 @@ func (s *Server) handle(req request) (response, bool) {
 	switch req.Method {
 	case "initialize":
 		resp.Result = map[string]any{
-			"protocolVersion": "2025-03-26",
+			"protocolVersion": requestedProtocolVersion(req.Params),
 			"capabilities": map[string]any{
 				"tools": map[string]any{},
 			},
@@ -111,6 +115,18 @@ func (s *Server) handle(req request) (response, bool) {
 	}
 
 	return resp, hasID
+}
+
+func requestedProtocolVersion(raw json.RawMessage) string {
+	const fallback = "2025-03-26"
+	if len(raw) == 0 || string(raw) == "null" {
+		return fallback
+	}
+	var params initializeParams
+	if err := json.Unmarshal(raw, &params); err != nil || params.ProtocolVersion == "" {
+		return fallback
+	}
+	return params.ProtocolVersion
 }
 
 func (s *Server) callTool(raw json.RawMessage) (any, error) {
