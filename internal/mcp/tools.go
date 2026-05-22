@@ -37,6 +37,15 @@ func Tools() []Tool {
 			}),
 		},
 		{
+			Name:        "sample_recent_headers",
+			Description: "Fetch the newest message headers by sequence number for a mailbox.",
+			InputSchema: objectSchema(map[string]any{
+				"mailbox":   stringSchema(),
+				"limit":     intSchema(),
+				"inboxOnly": boolSchema(),
+			}, "mailbox"),
+		},
+		{
 			Name:        "search_by_subject",
 			Description: "Search messages by subject text.",
 			InputSchema: objectSchema(map[string]any{
@@ -118,6 +127,12 @@ func (r *ToolRunner) Call(name string, args json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return r.imap.CountMessages(mailboxArg(req.Mailbox, req.InboxOnly))
+	case "sample_recent_headers":
+		var req sampleHeadersRequest
+		if err := decodeArgs(args, &req); err != nil {
+			return nil, err
+		}
+		return r.imap.SampleRecentHeaders(mailboxArg(req.Mailbox, req.InboxOnly), req.Limit)
 	case "search_by_subject":
 		var req subjectRequest
 		if err := decodeArgs(args, &req); err != nil {
@@ -195,6 +210,12 @@ func (r *ToolRunner) Call(name string, args json.RawMessage) (any, error) {
 
 type mailboxRequest struct {
 	Mailbox   string `json:"mailbox"`
+	InboxOnly bool   `json:"inboxOnly"`
+}
+
+type sampleHeadersRequest struct {
+	Mailbox   string `json:"mailbox"`
+	Limit     int    `json:"limit"`
 	InboxOnly bool   `json:"inboxOnly"`
 }
 

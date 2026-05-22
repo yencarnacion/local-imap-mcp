@@ -1,6 +1,9 @@
 package imapclient
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestSubjectTokens(t *testing.T) {
 	got := subjectTokens("Re: Online Reading Summary")
@@ -41,6 +44,21 @@ func TestEnsureAllMessages(t *testing.T) {
 	}
 	if got := criteria.SeqNum[0].String(); got != "1:*" {
 		t.Fatalf("SeqNum = %q, want 1:*", got)
+	}
+}
+
+func TestIMAPDateFormat(t *testing.T) {
+	date := time.Date(2026, time.May, 20, 15, 30, 0, 0, time.UTC)
+	if got := imapDate(date); got != "20-May-2026" {
+		t.Fatalf("imapDate = %q, want 20-May-2026", got)
+	}
+}
+
+func TestSummaryOnOrAfterUsesInternalDate(t *testing.T) {
+	summary := MessageSummary{InternalDate: "2026-05-20T12:00:00Z"}
+	cutoff := time.Date(2026, time.May, 20, 0, 0, 0, 0, time.UTC)
+	if !summaryOnOrAfter(summary, cutoff) {
+		t.Fatal("expected summary to match cutoff via internalDate")
 	}
 }
 

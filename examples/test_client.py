@@ -39,7 +39,9 @@ def main():
     print(json.dumps(rpc("tools/list", request_id=2), indent=2))
     print(json.dumps(tool("list_mailboxes", request_id=3), indent=2))
     print(json.dumps(tool("count_messages", {"mailbox": "AllMail"}, request_id=4), indent=2))
-    print(json.dumps(tool("search_recent", {"mailbox": "AllMail", "days": 7, "maxResults": 5}, request_id=5), indent=2))
+    print(json.dumps(tool("sample_recent_headers", {"mailbox": "AllMail", "limit": 10}, request_id=5), indent=2))
+    print(json.dumps(tool("search_recent", {"mailbox": "AllMail", "days": 7, "maxResults": 5}, request_id=6), indent=2))
+    print(json.dumps(tool("search_by_subject", {"mailbox": "AllMail", "subject": "Online Reading Summary", "maxResults": 20}, request_id=7), indent=2))
 
 
 if __name__ == "__main__":

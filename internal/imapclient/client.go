@@ -42,14 +42,15 @@ type MailboxCount struct {
 }
 
 type MessageSummary struct {
-	UID     uint32   `json:"uid"`
-	Mailbox string   `json:"mailbox"`
-	Subject string   `json:"subject"`
-	From    []string `json:"from"`
-	To      []string `json:"to"`
-	Date    string   `json:"date"`
-	Size    int64    `json:"size,omitempty"`
-	SeqNum  uint32   `json:"seq_num,omitempty"`
+	UID          uint32   `json:"uid"`
+	Mailbox      string   `json:"mailbox"`
+	Subject      string   `json:"subject"`
+	From         []string `json:"from"`
+	To           []string `json:"to"`
+	Date         string   `json:"date"`
+	InternalDate string   `json:"internalDate,omitempty"`
+	Size         int64    `json:"size,omitempty"`
+	SeqNum       uint32   `json:"seqNum,omitempty"`
 }
 
 func New(cfg *config.Config) *Client {
