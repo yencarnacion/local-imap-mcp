@@ -38,7 +38,7 @@ def main():
     print(json.dumps(rpc("initialize", request_id=1), indent=2))
     print(json.dumps(rpc("tools/list", request_id=2), indent=2))
     print(json.dumps(tool("list_mailboxes", request_id=3), indent=2))
-    print(json.dumps(tool("search_recent", {"mailbox": "INBOX", "days": 7, "maxResults": 5}, request_id=4), indent=2))
+    print(json.dumps(tool("search_recent", {"days": 7, "maxResults": 5}, request_id=4), indent=2))
 
 
 if __name__ == "__main__":

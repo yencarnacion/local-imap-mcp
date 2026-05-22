@@ -72,7 +72,7 @@ func defaultConfig() *Config {
 			Host:           "127.0.0.1",
 			Port:           143,
 			Secure:         false,
-			DefaultMailbox: "INBOX",
+			DefaultMailbox: "AllMail",
 			MaxResults:     50,
 			TimeoutSeconds: 30,
 		},

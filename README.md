@@ -52,7 +52,7 @@ server:
   mcp_path: "/mcp"
 
 imap:
-  default_mailbox: "INBOX"
+  default_mailbox: "AllMail"
   max_results: 50
   timeout_seconds: 30
 
@@ -106,12 +106,12 @@ curl -s http://127.0.0.1:8095/mcp \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_mailboxes","arguments":{}}}' | jq
 ```
 
-Search recent mail:
+Search recent mail in the default `AllMail` mailbox:
 
 ```bash
 curl -s http://127.0.0.1:8095/mcp \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"search_recent","arguments":{"mailbox":"INBOX","days":7,"maxResults":10}}}' | jq
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"search_recent","arguments":{"days":7,"maxResults":10}}}' | jq
 ```
 
 Search subject:
@@ -127,7 +127,7 @@ Fetch one message:
 ```bash
 curl -s http://127.0.0.1:8095/mcp \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"fetch_email","arguments":{"mailbox":"INBOX","uid":123}}}' | jq
+  -d '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"fetch_email","arguments":{"mailbox":"AllMail","uid":123}}}' | jq
 ```
 
 Get headers only:
@@ -135,7 +135,7 @@ Get headers only:
 ```bash
 curl -s http://127.0.0.1:8095/mcp \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"get_email_headers","arguments":{"mailbox":"INBOX","uid":123}}}' | jq
+  -d '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"get_email_headers","arguments":{"mailbox":"AllMail","uid":123}}}' | jq
 ```
 
 ## Python Test Client

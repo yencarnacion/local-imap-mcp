@@ -4,7 +4,7 @@ server:
   mcp_path: "/mcp"
 
 imap:
-  default_mailbox: "INBOX"
+  default_mailbox: "AllMail"
   max_results: 50
   timeout_seconds: 30
 
