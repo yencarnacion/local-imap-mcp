@@ -31,3 +31,21 @@ func TestSubjectCriteriaMatchesTokens(t *testing.T) {
 		}
 	}
 }
+
+func TestSubjectMatchesPrefixedSubject(t *testing.T) {
+	if !subjectMatches("Online Reading Summary", "(US) Friday Morning Online Reading Summary") {
+		t.Fatal("expected query to match prefixed subject")
+	}
+}
+
+func TestSubjectMatchesWordsWhenPhraseIsInterrupted(t *testing.T) {
+	if !subjectMatches("Online Reading Summary", "Friday Online and Morning Reading Summary") {
+		t.Fatal("expected query terms to match when present outside exact phrase")
+	}
+}
+
+func TestSubjectMatchesRejectsMissingTerm(t *testing.T) {
+	if subjectMatches("Online Reading Summary", "(US) Friday Morning Online Reading") {
+		t.Fatal("expected missing Summary term not to match")
+	}
+}

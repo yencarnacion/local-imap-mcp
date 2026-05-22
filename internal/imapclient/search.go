@@ -22,7 +22,11 @@ type SearchQuery struct {
 }
 
 func (c *Client) SearchBySubject(q SearchQuery) ([]MessageSummary, error) {
-	return c.search(q, subjectCriteria(q.Subject))
+	results, err := c.search(q, subjectCriteria(q.Subject))
+	if err != nil || len(results) > 0 {
+		return results, err
+	}
+	return c.searchSubjectLocally(q)
 }
 
 func (c *Client) SearchFrom(q SearchQuery) ([]MessageSummary, error) {
@@ -58,12 +62,8 @@ func (c *Client) search(q SearchQuery, criteria *imap.SearchCriteria) ([]Message
 	mailbox := c.mailbox(q.Mailbox)
 	maxResults := c.maxResults(q.MaxResults)
 
-	if q.StartDate != "" {
-		start, err := parseDate(q.StartDate)
-		if err != nil {
-			return nil, err
-		}
-		criteria.Since = start
+	if err := applyStartDate(criteria, q.StartDate); err != nil {
+		return nil, err
 	}
 
 	ic, err := c.connect()
@@ -91,6 +91,59 @@ func (c *Client) search(q SearchQuery, criteria *imap.SearchCriteria) ([]Message
 	}
 
 	return fetchSummaries(ic, mailbox, uids)
+}
+
+func (c *Client) searchSubjectLocally(q SearchQuery) ([]MessageSummary, error) {
+	mailbox := c.mailbox(q.Mailbox)
+	maxResults := c.maxResults(q.MaxResults)
+	criteria := &imap.SearchCriteria{}
+	if err := applyStartDate(criteria, q.StartDate); err != nil {
+		return nil, err
+	}
+
+	ic, err := c.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer closeClient(ic)
+
+	if err := selectMailbox(ic, mailbox); err != nil {
+		return nil, err
+	}
+
+	searchData, err := ic.UIDSearch(criteria, &imap.SearchOptions{ReturnAll: true}).Wait()
+	if err != nil {
+		return nil, classifyIMAPError(err)
+	}
+	uids := searchData.AllUIDs()
+	if len(uids) == 0 {
+		return []MessageSummary{}, nil
+	}
+
+	sort.Slice(uids, func(i, j int) bool { return uids[i] > uids[j] })
+
+	const chunkSize = 100
+	matches := make([]MessageSummary, 0, maxResults)
+	for start := 0; start < len(uids) && len(matches) < maxResults; start += chunkSize {
+		end := start + chunkSize
+		if end > len(uids) {
+			end = len(uids)
+		}
+		summaries, err := fetchSummaries(ic, mailbox, uids[start:end])
+		if err != nil {
+			return nil, err
+		}
+		for _, summary := range summaries {
+			if subjectMatches(q.Subject, summary.Subject) {
+				matches = append(matches, summary)
+				if len(matches) == maxResults {
+					break
+				}
+			}
+		}
+	}
+
+	return matches, nil
 }
 
 func fetchSummaries(c *clientlib.Client, mailbox string, uids []imap.UID) ([]MessageSummary, error) {
@@ -159,6 +212,18 @@ func parseDate(value string) (time.Time, error) {
 	return t, nil
 }
 
+func applyStartDate(criteria *imap.SearchCriteria, value string) error {
+	if value == "" {
+		return nil
+	}
+	start, err := parseDate(value)
+	if err != nil {
+		return err
+	}
+	criteria.Since = start
+	return nil
+}
+
 func subjectCriteria(subject string) *imap.SearchCriteria {
 	tokens := subjectTokens(subject)
 	if len(tokens) == 0 {
@@ -172,6 +237,34 @@ func subjectCriteria(subject string) *imap.SearchCriteria {
 		headers = append(headers, imap.SearchCriteriaHeaderField{Key: "Subject", Value: token})
 	}
 	return &imap.SearchCriteria{Header: headers}
+}
+
+func subjectMatches(query, subject string) bool {
+	normalizedQuery := normalizeSubject(query)
+	normalizedSubject := normalizeSubject(subject)
+	if normalizedQuery == "" {
+		return false
+	}
+	if strings.Contains(normalizedSubject, normalizedQuery) {
+		return true
+	}
+	tokens := subjectTokens(query)
+	if len(tokens) == 0 {
+		return false
+	}
+	for _, token := range tokens {
+		if !strings.Contains(normalizedSubject, strings.ToLower(token)) {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeSubject(subject string) string {
+	parts := strings.FieldsFunc(subject, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	return strings.ToLower(strings.Join(parts, " "))
 }
 
 func subjectTokens(subject string) []string {

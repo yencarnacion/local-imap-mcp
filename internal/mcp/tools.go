@@ -36,6 +36,7 @@ func Tools() []Tool {
 				"mailbox":    stringSchema(),
 				"startDate":  stringSchema(),
 				"maxResults": intSchema(),
+				"inboxOnly":  boolSchema(),
 			}, "subject"),
 		},
 		{
@@ -45,6 +46,7 @@ func Tools() []Tool {
 				"mailbox":    stringSchema(),
 				"days":       intSchema(),
 				"maxResults": intSchema(),
+				"inboxOnly":  boolSchema(),
 			}, "days"),
 		},
 		{
@@ -71,6 +73,7 @@ func Tools() []Tool {
 				"mailbox":    stringSchema(),
 				"startDate":  stringSchema(),
 				"maxResults": intSchema(),
+				"inboxOnly":  boolSchema(),
 			}, "from"),
 		},
 		{
@@ -81,6 +84,7 @@ func Tools() []Tool {
 				"mailbox":    stringSchema(),
 				"startDate":  stringSchema(),
 				"maxResults": intSchema(),
+				"inboxOnly":  boolSchema(),
 			}, "to"),
 		},
 		{
@@ -90,6 +94,7 @@ func Tools() []Tool {
 				"mailbox":    stringSchema(),
 				"startDate":  stringSchema(),
 				"maxResults": intSchema(),
+				"inboxOnly":  boolSchema(),
 			}, "startDate"),
 		},
 	}
@@ -108,7 +113,7 @@ func (r *ToolRunner) Call(name string, args json.RawMessage) (any, error) {
 			return nil, fmt.Errorf("subject is required")
 		}
 		return r.imap.SearchBySubject(imapclient.SearchQuery{
-			Mailbox: req.Mailbox, Subject: req.Subject, StartDate: req.StartDate, MaxResults: req.MaxResults,
+			Mailbox: mailboxArg(req.Mailbox, req.InboxOnly), Subject: req.Subject, StartDate: req.StartDate, MaxResults: req.MaxResults,
 		})
 	case "search_recent":
 		var req recentRequest
@@ -116,7 +121,7 @@ func (r *ToolRunner) Call(name string, args json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return r.imap.SearchRecent(imapclient.SearchQuery{
-			Mailbox: req.Mailbox, Days: req.Days, MaxResults: req.MaxResults,
+			Mailbox: mailboxArg(req.Mailbox, req.InboxOnly), Days: req.Days, MaxResults: req.MaxResults,
 		})
 	case "fetch_email":
 		var req uidRequest
@@ -145,7 +150,7 @@ func (r *ToolRunner) Call(name string, args json.RawMessage) (any, error) {
 			return nil, fmt.Errorf("from is required")
 		}
 		return r.imap.SearchFrom(imapclient.SearchQuery{
-			Mailbox: req.Mailbox, From: req.From, StartDate: req.StartDate, MaxResults: req.MaxResults,
+			Mailbox: mailboxArg(req.Mailbox, req.InboxOnly), From: req.From, StartDate: req.StartDate, MaxResults: req.MaxResults,
 		})
 	case "search_to":
 		var req toRequest
@@ -156,7 +161,7 @@ func (r *ToolRunner) Call(name string, args json.RawMessage) (any, error) {
 			return nil, fmt.Errorf("to is required")
 		}
 		return r.imap.SearchTo(imapclient.SearchQuery{
-			Mailbox: req.Mailbox, To: req.To, StartDate: req.StartDate, MaxResults: req.MaxResults,
+			Mailbox: mailboxArg(req.Mailbox, req.InboxOnly), To: req.To, StartDate: req.StartDate, MaxResults: req.MaxResults,
 		})
 	case "search_since":
 		var req sinceRequest
@@ -167,7 +172,7 @@ func (r *ToolRunner) Call(name string, args json.RawMessage) (any, error) {
 			return nil, fmt.Errorf("startDate is required")
 		}
 		return r.imap.SearchSince(imapclient.SearchQuery{
-			Mailbox: req.Mailbox, StartDate: req.StartDate, MaxResults: req.MaxResults,
+			Mailbox: mailboxArg(req.Mailbox, req.InboxOnly), StartDate: req.StartDate, MaxResults: req.MaxResults,
 		})
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
@@ -179,12 +184,14 @@ type subjectRequest struct {
 	Mailbox    string `json:"mailbox"`
 	StartDate  string `json:"startDate"`
 	MaxResults int    `json:"maxResults"`
+	InboxOnly  bool   `json:"inboxOnly"`
 }
 
 type recentRequest struct {
 	Mailbox    string `json:"mailbox"`
 	Days       int    `json:"days"`
 	MaxResults int    `json:"maxResults"`
+	InboxOnly  bool   `json:"inboxOnly"`
 }
 
 type uidRequest struct {
@@ -197,6 +204,7 @@ type fromRequest struct {
 	Mailbox    string `json:"mailbox"`
 	StartDate  string `json:"startDate"`
 	MaxResults int    `json:"maxResults"`
+	InboxOnly  bool   `json:"inboxOnly"`
 }
 
 type toRequest struct {
@@ -204,12 +212,24 @@ type toRequest struct {
 	Mailbox    string `json:"mailbox"`
 	StartDate  string `json:"startDate"`
 	MaxResults int    `json:"maxResults"`
+	InboxOnly  bool   `json:"inboxOnly"`
 }
 
 type sinceRequest struct {
 	Mailbox    string `json:"mailbox"`
 	StartDate  string `json:"startDate"`
 	MaxResults int    `json:"maxResults"`
+	InboxOnly  bool   `json:"inboxOnly"`
+}
+
+func mailboxArg(mailbox string, inboxOnly bool) string {
+	if mailbox != "" {
+		return mailbox
+	}
+	if inboxOnly {
+		return "INBOX"
+	}
+	return ""
 }
 
 func decodeArgs(raw json.RawMessage, v any) error {
@@ -237,4 +257,8 @@ func stringSchema() map[string]string {
 
 func intSchema() map[string]string {
 	return map[string]string{"type": "integer"}
+}
+
+func boolSchema() map[string]string {
+	return map[string]string{"type": "boolean"}
 }
