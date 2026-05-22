@@ -1,4 +1,4 @@
 .env
-local-imap-mcp
+/local-imap-mcp
 __pycache__/
 *.pyc
