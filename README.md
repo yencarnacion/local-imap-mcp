@@ -182,6 +182,59 @@ For a fuller manual MCP diagnostic against the default local test URL:
 python3 examples/manual_mcp_test.py
 ```
 
+## Import Progress
+
+Run this on the machine that can connect to your local Dovecot IMAP server. It reads the same `.env` and `config.yaml` as the MCP server.
+
+One-shot status:
+
+```bash
+go run ./cmd/local-imap-progress -mailbox AllMail
+```
+
+Watch progress every 10 seconds:
+
+```bash
+go run ./cmd/local-imap-progress -mailbox AllMail -watch -interval 10s
+```
+
+Or build a reusable binary:
+
+```bash
+go build -o local-imap-progress ./cmd/local-imap-progress
+./local-imap-progress -mailbox AllMail -watch -interval 10s
+```
+
+If you know the remote/source mailbox total, pass it as `-target` to get percent and ETA:
+
+```bash
+go run ./cmd/local-imap-progress -mailbox AllMail -watch -interval 10s -target 250000
+```
+
+Example output:
+
+```text
+local-imap-mcp import progress
+===============================
+time:      2026-05-22T14:10:00-04:00
+mailbox:   AllMail
+messages:  105075
+uidNext:   105076
+uidValid:  1779458646
+recent:    0
+delta:     +314 in 10s (1884.0 msg/min)
+target:    250000 (42.03%, 144925 remaining)
+eta:       1h16m55s at current rate
+
+latest exposed message
+----------------------
+seq/uid:   105075 / 105075
+date:      2015-01-20T20:00:49Z
+internal:  2015-01-20T20:01:17Z
+from:      Jennie (Udacity Team) <support@udacity.com>
+subject:   Help us design a new Android course for beginners
+```
+
 ## systemd
 
 Example unit file is in `systemd/local-imap-mcp.service`.
