@@ -32,6 +32,18 @@ func TestSubjectCriteriaMatchesTokens(t *testing.T) {
 	}
 }
 
+func TestEnsureAllMessages(t *testing.T) {
+	criteria := subjectCriteria("Online Reading Summary")
+	ensureAllMessages(criteria)
+
+	if len(criteria.SeqNum) != 1 {
+		t.Fatalf("SeqNum length = %d, want 1", len(criteria.SeqNum))
+	}
+	if got := criteria.SeqNum[0].String(); got != "1:*" {
+		t.Fatalf("SeqNum = %q, want 1:*", got)
+	}
+}
+
 func TestSubjectMatchesPrefixedSubject(t *testing.T) {
 	if !subjectMatches("Online Reading Summary", "(US) Friday Morning Online Reading Summary") {
 		t.Fatal("expected query to match prefixed subject")

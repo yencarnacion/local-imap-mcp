@@ -32,6 +32,15 @@ type Mailbox struct {
 	Attrs     []string `json:"attrs,omitempty"`
 }
 
+type MailboxCount struct {
+	Mailbox     string `json:"mailbox"`
+	Exists      uint32 `json:"exists"`
+	Messages    uint32 `json:"messages"`
+	Recent      uint32 `json:"recent"`
+	UIDNext     uint32 `json:"uidNext"`
+	UIDValidity uint32 `json:"uidValidity"`
+}
+
 type MessageSummary struct {
 	UID     uint32   `json:"uid"`
 	Mailbox string   `json:"mailbox"`
@@ -77,6 +86,30 @@ func (c *Client) ListMailboxes() ([]Mailbox, error) {
 	return mailboxes, nil
 }
 
+func (c *Client) CountMessages(mailbox string) (*MailboxCount, error) {
+	mailbox = c.mailbox(mailbox)
+
+	ic, err := c.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer closeClient(ic)
+
+	data, err := selectMailbox(ic, mailbox)
+	if err != nil {
+		return nil, err
+	}
+
+	return &MailboxCount{
+		Mailbox:     mailbox,
+		Exists:      data.NumMessages,
+		Messages:    data.NumMessages,
+		Recent:      data.NumRecent,
+		UIDNext:     uint32(data.UIDNext),
+		UIDValidity: data.UIDValidity,
+	}, nil
+}
+
 func (c *Client) FetchEmail(mailbox string, uid uint32) (*emailparse.Email, error) {
 	raw, err := c.fetchBody(mailbox, uid, imap.FetchItemBodySection{Peek: true})
 	if err != nil {
@@ -103,7 +136,7 @@ func (c *Client) fetchBody(mailbox string, uid uint32, section imap.FetchItemBod
 	}
 	defer closeClient(ic)
 
-	if err := selectMailbox(ic, mailbox); err != nil {
+	if _, err := selectMailbox(ic, mailbox); err != nil {
 		return nil, err
 	}
 	options := &imap.FetchOptions{
@@ -152,14 +185,15 @@ func (c *Client) connect() (*clientlib.Client, error) {
 	return ic, nil
 }
 
-func selectMailbox(c *clientlib.Client, mailbox string) error {
+func selectMailbox(c *clientlib.Client, mailbox string) (*imap.SelectData, error) {
 	if mailbox == "" {
-		return ErrMailboxNotFound
+		return nil, ErrMailboxNotFound
 	}
-	if _, err := c.Select(mailbox, &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
-		return classifyIMAPError(err)
+	data, err := c.Select(mailbox, &imap.SelectOptions{ReadOnly: true}).Wait()
+	if err != nil {
+		return nil, classifyIMAPError(err)
 	}
-	return nil
+	return data, nil
 }
 
 func closeClient(c *clientlib.Client) {

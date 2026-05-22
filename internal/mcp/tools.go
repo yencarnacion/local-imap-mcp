@@ -29,6 +29,14 @@ func Tools() []Tool {
 			InputSchema: objectSchema(map[string]any{}),
 		},
 		{
+			Name:        "count_messages",
+			Description: "Return read-only SELECT counts and UID metadata for a mailbox.",
+			InputSchema: objectSchema(map[string]any{
+				"mailbox":   stringSchema(),
+				"inboxOnly": boolSchema(),
+			}),
+		},
+		{
 			Name:        "search_by_subject",
 			Description: "Search messages by subject text.",
 			InputSchema: objectSchema(map[string]any{
@@ -104,6 +112,12 @@ func (r *ToolRunner) Call(name string, args json.RawMessage) (any, error) {
 	switch name {
 	case "list_mailboxes":
 		return r.imap.ListMailboxes()
+	case "count_messages":
+		var req mailboxRequest
+		if err := decodeArgs(args, &req); err != nil {
+			return nil, err
+		}
+		return r.imap.CountMessages(mailboxArg(req.Mailbox, req.InboxOnly))
 	case "search_by_subject":
 		var req subjectRequest
 		if err := decodeArgs(args, &req); err != nil {
@@ -177,6 +191,11 @@ func (r *ToolRunner) Call(name string, args json.RawMessage) (any, error) {
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
+}
+
+type mailboxRequest struct {
+	Mailbox   string `json:"mailbox"`
+	InboxOnly bool   `json:"inboxOnly"`
 }
 
 type subjectRequest struct {

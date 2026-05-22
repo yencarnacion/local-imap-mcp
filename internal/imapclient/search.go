@@ -72,11 +72,16 @@ func (c *Client) search(q SearchQuery, criteria *imap.SearchCriteria) ([]Message
 	}
 	defer closeClient(ic)
 
-	if err := selectMailbox(ic, mailbox); err != nil {
+	selectData, err := selectMailbox(ic, mailbox)
+	if err != nil {
 		return nil, err
 	}
+	if selectData.NumMessages == 0 {
+		return []MessageSummary{}, nil
+	}
+	ensureAllMessages(criteria)
 
-	searchData, err := ic.UIDSearch(criteria, &imap.SearchOptions{ReturnAll: true}).Wait()
+	searchData, err := ic.UIDSearch(criteria, nil).Wait()
 	if err != nil {
 		return nil, classifyIMAPError(err)
 	}
@@ -107,11 +112,16 @@ func (c *Client) searchSubjectLocally(q SearchQuery) ([]MessageSummary, error) {
 	}
 	defer closeClient(ic)
 
-	if err := selectMailbox(ic, mailbox); err != nil {
+	selectData, err := selectMailbox(ic, mailbox)
+	if err != nil {
 		return nil, err
 	}
+	if selectData.NumMessages == 0 {
+		return []MessageSummary{}, nil
+	}
+	ensureAllMessages(criteria)
 
-	searchData, err := ic.UIDSearch(criteria, &imap.SearchOptions{ReturnAll: true}).Wait()
+	searchData, err := ic.UIDSearch(criteria, nil).Wait()
 	if err != nil {
 		return nil, classifyIMAPError(err)
 	}
@@ -222,6 +232,15 @@ func applyStartDate(criteria *imap.SearchCriteria, value string) error {
 	}
 	criteria.Since = start
 	return nil
+}
+
+func ensureAllMessages(criteria *imap.SearchCriteria) {
+	if len(criteria.SeqNum) > 0 || len(criteria.UID) > 0 {
+		return
+	}
+	var all imap.SeqSet
+	all.AddRange(1, 0)
+	criteria.SeqNum = []imap.SeqSet{all}
 }
 
 func subjectCriteria(subject string) *imap.SearchCriteria {

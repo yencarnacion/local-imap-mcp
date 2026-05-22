@@ -13,6 +13,7 @@ By default, this project is read-only. It does not delete, move, expunge, mark r
 ## Tools
 
 - `list_mailboxes`
+- `count_messages`
 - `search_by_subject`
 - `search_recent`
 - `fetch_email`
@@ -106,12 +107,28 @@ curl -s http://127.0.0.1:8095/mcp \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_mailboxes","arguments":{}}}' | jq
 ```
 
+Count messages in `AllMail`:
+
+```bash
+curl -s http://127.0.0.1:8095/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"count_messages","arguments":{"mailbox":"AllMail"}}}' | jq
+```
+
 Search recent mail in the default `AllMail` mailbox:
 
 ```bash
 curl -s http://127.0.0.1:8095/mcp \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"search_recent","arguments":{"days":7,"maxResults":10}}}' | jq
+  -d '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"search_recent","arguments":{"days":7,"maxResults":10}}}' | jq
+```
+
+Search `AllMail` since a date:
+
+```bash
+curl -s http://127.0.0.1:8095/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"search_since","arguments":{"mailbox":"AllMail","startDate":"2026-05-20","maxResults":20}}}' | jq
 ```
 
 Search subject:
@@ -119,7 +136,7 @@ Search subject:
 ```bash
 curl -s http://127.0.0.1:8095/mcp \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"search_by_subject","arguments":{"mailbox":"AllMail","subject":"invoice","startDate":"2026-01-01","maxResults":10}}}' | jq
+  -d '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"search_by_subject","arguments":{"mailbox":"AllMail","subject":"invoice","startDate":"2026-01-01","maxResults":10}}}' | jq
 ```
 
 Fetch one message:
@@ -127,7 +144,7 @@ Fetch one message:
 ```bash
 curl -s http://127.0.0.1:8095/mcp \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"fetch_email","arguments":{"mailbox":"AllMail","uid":123}}}' | jq
+  -d '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"fetch_email","arguments":{"mailbox":"AllMail","uid":123}}}' | jq
 ```
 
 Get headers only:
@@ -135,7 +152,7 @@ Get headers only:
 ```bash
 curl -s http://127.0.0.1:8095/mcp \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"get_email_headers","arguments":{"mailbox":"AllMail","uid":123}}}' | jq
+  -d '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"get_email_headers","arguments":{"mailbox":"AllMail","uid":123}}}' | jq
 ```
 
 ## Python Test Client
