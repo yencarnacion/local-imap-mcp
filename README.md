@@ -176,6 +176,12 @@ Or point it at another URL:
 python3 examples/test_client.py http://127.0.0.1:8095/mcp
 ```
 
+For a fuller manual MCP diagnostic against the default local test URL:
+
+```bash
+python3 examples/manual_mcp_test.py
+```
+
 ## systemd
 
 Example unit file is in `systemd/local-imap-mcp.service`.
