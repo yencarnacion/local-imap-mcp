@@ -1,0 +1,206 @@
+Build a Go project for a local IMAP MCP server.
+
+Goal:
+I have email already cached locally using mbsync/isync + Dovecot. Dovecot exposes the cached mail over local IMAP at 127.0.0.1:143. I want a Go MCP server that connects to this local Dovecot IMAP server and exposes useful email tools to AI agents. The server should start from the CLI, read .env and config.yaml, and follow the simple Go web-server style of this repo: https://github.com/yencarnacion/polygon-charts
+
+Language:
+Go only.
+
+Project name:
+local-imap-mcp
+
+Main requirements:
+1. CLI app starts with:
+   go run ./cmd/local-imap-mcp
+
+2. Config files:
+   - .env for secrets
+   - config.yaml for non-secret settings
+
+3. .env example:
+   IMAP_HOST=127.0.0.1
+   IMAP_PORT=143
+   IMAP_SECURE=false
+   IMAP_USER=yamir
+   IMAP_PASS=change-me
+
+4. config.yaml example:
+   server:
+     host: "0.0.0.0"
+     port: 8095
+     mcp_path: "/mcp"
+
+   imap:
+     default_mailbox: "INBOX"
+     max_results: 50
+     timeout_seconds: 30
+
+   safety:
+     read_only: true
+     allow_delete: false
+     allow_move: false
+     allow_send: false
+
+5. It should expose an HTTP MCP endpoint:
+   http://host:port/mcp
+
+6. It should support MCP Streamable HTTP transport if practical. If full MCP Streamable HTTP is too much, implement a simple JSON-RPC 2.0 HTTP endpoint compatible with MCP-style requests:
+   - initialize
+   - notifications/initialized
+   - tools/list
+   - tools/call
+
+7. Implement these MCP tools:
+   - list_mailboxes
+   - search_by_subject
+   - search_recent
+   - fetch_email
+   - get_email_headers
+   - search_from
+   - search_to
+   - search_since
+
+8. Tool behavior:
+
+   list_mailboxes:
+   Arguments: {}
+   Returns all IMAP mailboxes from Dovecot.
+
+   search_by_subject:
+   Arguments:
+     subject: string
+     mailbox: optional string
+     startDate: optional YYYY-MM-DD
+     maxResults: optional int
+   Searches subject text.
+
+   search_recent:
+   Arguments:
+     mailbox: optional string
+     days: int
+     maxResults: optional int
+   Returns recent messages.
+
+   fetch_email:
+   Arguments:
+     mailbox: string
+     uid: number
+   Returns full parsed email:
+     uid
+     mailbox
+     subject
+     from
+     to
+     cc
+     date
+     message_id
+     text_body
+     html_body
+     attachments metadata only
+   Do not save attachments yet.
+
+   get_email_headers:
+   Arguments:
+     mailbox: string
+     uid: number
+   Returns headers only.
+
+   search_from:
+   Arguments:
+     from: string
+     mailbox: optional string
+     startDate: optional YYYY-MM-DD
+     maxResults: optional int
+
+   search_to:
+   Arguments:
+     to: string
+     mailbox: optional string
+     startDate: optional YYYY-MM-DD
+     maxResults: optional int
+
+   search_since:
+   Arguments:
+     mailbox: optional string
+     startDate: YYYY-MM-DD
+     maxResults: optional int
+
+9. The server must be read-only by default.
+   Do not implement delete, move, expunge, mark read, mark unread, send email, or SMTP unless safety.allow_* is enabled later.
+   For this version, no write operations.
+
+10. IMAP library:
+   Use a maintained Go IMAP client library.
+   Prefer github.com/emersion/go-imap/v2 and related packages if appropriate.
+   Use TLS only if IMAP_SECURE=true.
+   For local Dovecot on 127.0.0.1:143, support plain TCP.
+
+11. Email parsing:
+   Parse MIME safely.
+   Return text/plain and text/html bodies where available.
+   Attachments should return metadata only:
+     filename
+     content_type
+     size if available
+
+12. Logging:
+   Log startup config without secrets.
+   Log each tool call name and duration.
+   Log IMAP connection errors clearly.
+   Never log passwords.
+
+13. Error handling:
+   Return structured JSON-RPC errors.
+   If authentication fails, say IMAP authentication failed.
+   If mailbox does not exist, say mailbox not found.
+   If no messages found, return empty result, not an error.
+
+14. Include:
+   - README.md
+   - .env.example
+   - config.yaml example
+   - systemd service example
+   - curl examples
+   - sample Python test client similar to my manual MCP tester
+
+15. Suggested project structure:
+   cmd/local-imap-mcp/main.go
+   internal/config/config.go
+   internal/imapclient/client.go
+   internal/imapclient/search.go
+   internal/emailparse/parser.go
+   internal/mcp/server.go
+   internal/mcp/tools.go
+   internal/logging/logging.go
+   config.yaml
+   .env.example
+   README.md
+
+16. README should include Ubuntu 22.04 setup:
+   sudo apt install golang-go
+   cp .env.example .env
+   edit .env
+   go mod tidy
+   go run ./cmd/local-imap-mcp
+
+17. Include systemd unit:
+   /etc/systemd/system/local-imap-mcp.service
+
+   It should run as user yamir, working directory /home/yamir/Documents/local-imap-mcp, and listen on port 8095.
+
+18. The server should work with this Dovecot test:
+   openssl s_client -connect 127.0.0.1:143 -starttls imap
+   a login yamir password
+   b list "" "*"
+
+19. Important:
+   My Dovecot currently shows mailboxes:
+   - INBOX
+   - AllMail
+
+   Make sure mailbox names like AllMail work.
+
+20. Provide production-quality Go code, not pseudocode.
+   It must compile.
+   Prefer small, readable files.
+   Keep dependencies minimal.

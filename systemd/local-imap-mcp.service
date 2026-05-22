@@ -1,0 +1,15 @@
+[Unit]
+Description=Local IMAP MCP Server
+After=network.target dovecot.service
+
+[Service]
+Type=simple
+User=yamir
+WorkingDirectory=/home/yamir/Documents/local-imap-mcp
+EnvironmentFile=/home/yamir/Documents/local-imap-mcp/.env
+ExecStart=/usr/bin/go run ./cmd/local-imap-mcp
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

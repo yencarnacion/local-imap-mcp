@@ -1,0 +1,4 @@
+.env
+local-imap-mcp
+__pycache__/
+*.pyc

@@ -1,0 +1,15 @@
+server:
+  host: "0.0.0.0"
+  port: 8095
+  mcp_path: "/mcp"
+
+imap:
+  default_mailbox: "INBOX"
+  max_results: 50
+  timeout_seconds: 30
+
+safety:
+  read_only: true
+  allow_delete: false
+  allow_move: false
+  allow_send: false
