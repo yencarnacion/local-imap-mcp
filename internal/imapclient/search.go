@@ -3,7 +3,9 @@ package imapclient
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/emersion/go-imap/v2"
 	clientlib "github.com/emersion/go-imap/v2/imapclient"
@@ -20,10 +22,7 @@ type SearchQuery struct {
 }
 
 func (c *Client) SearchBySubject(q SearchQuery) ([]MessageSummary, error) {
-	criteria := &imap.SearchCriteria{
-		Header: []imap.SearchCriteriaHeaderField{{Key: "Subject", Value: q.Subject}},
-	}
-	return c.search(q, criteria)
+	return c.search(q, subjectCriteria(q.Subject))
 }
 
 func (c *Client) SearchFrom(q SearchQuery) ([]MessageSummary, error) {
@@ -158,6 +157,49 @@ func parseDate(value string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("date must be YYYY-MM-DD")
 	}
 	return t, nil
+}
+
+func subjectCriteria(subject string) *imap.SearchCriteria {
+	tokens := subjectTokens(subject)
+	if len(tokens) == 0 {
+		return &imap.SearchCriteria{
+			Header: []imap.SearchCriteriaHeaderField{{Key: "Subject", Value: subject}},
+		}
+	}
+
+	headers := make([]imap.SearchCriteriaHeaderField, 0, len(tokens))
+	for _, token := range tokens {
+		headers = append(headers, imap.SearchCriteriaHeaderField{Key: "Subject", Value: token})
+	}
+	return &imap.SearchCriteria{Header: headers}
+}
+
+func subjectTokens(subject string) []string {
+	stopWords := map[string]struct{}{
+		"a": {}, "an": {}, "and": {}, "for": {}, "fwd": {}, "in": {}, "of": {}, "on": {}, "or": {}, "re": {}, "the": {}, "to": {},
+	}
+	seen := make(map[string]struct{})
+	parts := strings.FieldsFunc(subject, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+
+	tokens := make([]string, 0, len(parts))
+	for _, part := range parts {
+		token := strings.TrimSpace(part)
+		key := strings.ToLower(token)
+		if len(key) < 2 {
+			continue
+		}
+		if _, skip := stopWords[key]; skip {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		tokens = append(tokens, token)
+	}
+	return tokens
 }
 
 func formatAddresses(addrs []imap.Address) []string {
