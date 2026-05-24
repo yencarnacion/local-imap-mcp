@@ -116,6 +116,67 @@ func TestHeaderMatchesFiltersSenderDomainAndUnread(t *testing.T) {
 	}
 }
 
+func TestNextUIDBatchCapsAtLowUIDWithoutUnderflow(t *testing.T) {
+	low, span, ok := nextUIDBatch(39, 0, 1000)
+	if !ok {
+		t.Fatal("expected batch")
+	}
+	if low != 1 {
+		t.Fatalf("low = %d, want 1", low)
+	}
+	if span != 39 {
+		t.Fatalf("span = %d, want 39", span)
+	}
+}
+
+func TestNextUIDBatchHonorsAfterUID(t *testing.T) {
+	low, span, ok := nextUIDBatch(40, 10, 1000)
+	if !ok {
+		t.Fatal("expected batch")
+	}
+	if low != 11 {
+		t.Fatalf("low = %d, want 11", low)
+	}
+	if span != 30 {
+		t.Fatalf("span = %d, want 30", span)
+	}
+}
+
+func TestThreadKeyUsesRootReference(t *testing.T) {
+	summary := MessageSummary{
+		UID:        10,
+		Mailbox:    "AllMail",
+		MessageID:  "<reply@example.com>",
+		InReplyTo:  "<parent@example.com>",
+		References: []string{"<root@example.com>", "<parent@example.com>"},
+	}
+
+	if got := threadKey(summary); got != "<root@example.com>" {
+		t.Fatalf("threadKey = %q, want root reference", got)
+	}
+}
+
+func TestBodyMatcherLiteralCaseInsensitiveSnippet(t *testing.T) {
+	matcher, err := newBodyMatcher("787", false, false)
+	if err != nil {
+		t.Fatalf("newBodyMatcher returned error: %v", err)
+	}
+
+	snippet, ok := matcher.snippet([]byte("Call me at 787-555-1212 about the plan."))
+	if !ok {
+		t.Fatal("expected body match")
+	}
+	if snippet == "" {
+		t.Fatal("expected non-empty snippet")
+	}
+}
+
+func TestParseDateWindowRejectsEndBeforeStart(t *testing.T) {
+	if _, _, err := parseDateWindow("2026-05-02", "2026-05-01"); err == nil {
+		t.Fatal("expected endDate before startDate to fail")
+	}
+}
+
 func TestApplyThreadHeaders(t *testing.T) {
 	raw := []byte("Message-ID: <m1@example.com>\r\nIn-Reply-To: <m0@example.com>\r\nReferences: <m0@example.com> <root@example.com>\r\n\r\n")
 	var summary MessageSummary

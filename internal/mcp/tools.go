@@ -138,8 +138,55 @@ func Tools() []Tool {
 				"senderDomain":        stringSchema(),
 				"unreadOnly":          boolSchema(),
 				"hasReplyHeaders":     boolSchema(),
+				"collapseThreads":     boolSchema(),
 				"stopAtDateThreshold": boolSchema(),
 				"inboxOnly":           boolSchema(),
+			}),
+		},
+		{
+			Name:        "count_date_window",
+			Description: "Exhaustively count headers in a date window, with optional address filters and thread collapse.",
+			InputSchema: objectSchema(map[string]any{
+				"mailbox":         stringSchema(),
+				"startDate":       stringSchema(),
+				"endDate":         stringSchema(),
+				"beforeUID":       intSchema(),
+				"afterUID":        intSchema(),
+				"uidWindow":       intSchema(),
+				"from":            stringSchema(),
+				"to":              stringSchema(),
+				"senderDomain":    stringSchema(),
+				"unreadOnly":      boolSchema(),
+				"hasReplyHeaders": boolSchema(),
+				"collapseThreads": boolSchema(),
+				"inboxOnly":       boolSchema(),
+			}, "startDate"),
+		},
+		{
+			Name:        "search_body",
+			Description: "Search full message bodies by literal text or regex over a bounded UID page. Returns matching headers and snippets.",
+			InputSchema: objectSchema(map[string]any{
+				"mailbox":       stringSchema(),
+				"pattern":       stringSchema(),
+				"regex":         boolSchema(),
+				"caseSensitive": boolSchema(),
+				"startDate":     stringSchema(),
+				"endDate":       stringSchema(),
+				"beforeUID":     intSchema(),
+				"afterUID":      intSchema(),
+				"cursor":        stringSchema(),
+				"limit":         intSchema(),
+				"uidWindow":     intSchema(),
+				"inboxOnly":     boolSchema(),
+			}, "pattern"),
+		},
+		{
+			Name:        "mailbox_sync_health",
+			Description: "Expose mailbox import/sync health, UID metadata, latest sampled message, and optional target progress.",
+			InputSchema: objectSchema(map[string]any{
+				"mailbox":        stringSchema(),
+				"targetMessages": intSchema(),
+				"inboxOnly":      boolSchema(),
 			}),
 		},
 	}
@@ -255,8 +302,58 @@ func (r *ToolRunner) Call(name string, args json.RawMessage) (any, error) {
 			SenderDomain:        req.SenderDomain,
 			UnreadOnly:          req.UnreadOnly,
 			HasReplyHeaders:     req.HasReplyHeaders,
+			CollapseThreads:     req.CollapseThreads,
 			StopAtDateThreshold: req.StopAtDateThreshold,
 		})
+	case "count_date_window":
+		var req countDateWindowRequest
+		if err := decodeArgs(args, &req); err != nil {
+			return nil, err
+		}
+		if req.StartDate == "" {
+			return nil, fmt.Errorf("startDate is required")
+		}
+		return r.imap.CountDateWindow(imapclient.DateWindowCountQuery{
+			Mailbox:         mailboxArg(req.Mailbox, req.InboxOnly),
+			StartDate:       req.StartDate,
+			EndDate:         req.EndDate,
+			BeforeUID:       req.BeforeUID,
+			AfterUID:        req.AfterUID,
+			UIDWindow:       req.UIDWindow,
+			From:            req.From,
+			To:              req.To,
+			SenderDomain:    req.SenderDomain,
+			UnreadOnly:      req.UnreadOnly,
+			HasReplyHeaders: req.HasReplyHeaders,
+			CollapseThreads: req.CollapseThreads,
+		})
+	case "search_body":
+		var req bodySearchRequest
+		if err := decodeArgs(args, &req); err != nil {
+			return nil, err
+		}
+		if req.Pattern == "" {
+			return nil, fmt.Errorf("pattern is required")
+		}
+		return r.imap.SearchBody(imapclient.BodySearchQuery{
+			Mailbox:       mailboxArg(req.Mailbox, req.InboxOnly),
+			Pattern:       req.Pattern,
+			Regex:         req.Regex,
+			CaseSensitive: req.CaseSensitive,
+			StartDate:     req.StartDate,
+			EndDate:       req.EndDate,
+			BeforeUID:     req.BeforeUID,
+			AfterUID:      req.AfterUID,
+			Cursor:        req.Cursor,
+			Limit:         req.Limit,
+			UIDWindow:     req.UIDWindow,
+		})
+	case "mailbox_sync_health":
+		var req syncHealthRequest
+		if err := decodeArgs(args, &req); err != nil {
+			return nil, err
+		}
+		return r.imap.MailboxSyncHealth(mailboxArg(req.Mailbox, req.InboxOnly), req.TargetMessages)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -329,8 +426,46 @@ type scanHeadersRangeRequest struct {
 	SenderDomain        string `json:"senderDomain"`
 	UnreadOnly          bool   `json:"unreadOnly"`
 	HasReplyHeaders     bool   `json:"hasReplyHeaders"`
+	CollapseThreads     bool   `json:"collapseThreads"`
 	StopAtDateThreshold bool   `json:"stopAtDateThreshold"`
 	InboxOnly           bool   `json:"inboxOnly"`
+}
+
+type countDateWindowRequest struct {
+	Mailbox         string `json:"mailbox"`
+	StartDate       string `json:"startDate"`
+	EndDate         string `json:"endDate"`
+	BeforeUID       uint32 `json:"beforeUID"`
+	AfterUID        uint32 `json:"afterUID"`
+	UIDWindow       int    `json:"uidWindow"`
+	From            string `json:"from"`
+	To              string `json:"to"`
+	SenderDomain    string `json:"senderDomain"`
+	UnreadOnly      bool   `json:"unreadOnly"`
+	HasReplyHeaders bool   `json:"hasReplyHeaders"`
+	CollapseThreads bool   `json:"collapseThreads"`
+	InboxOnly       bool   `json:"inboxOnly"`
+}
+
+type bodySearchRequest struct {
+	Mailbox       string `json:"mailbox"`
+	Pattern       string `json:"pattern"`
+	Regex         bool   `json:"regex"`
+	CaseSensitive bool   `json:"caseSensitive"`
+	StartDate     string `json:"startDate"`
+	EndDate       string `json:"endDate"`
+	BeforeUID     uint32 `json:"beforeUID"`
+	AfterUID      uint32 `json:"afterUID"`
+	Cursor        string `json:"cursor"`
+	Limit         int    `json:"limit"`
+	UIDWindow     int    `json:"uidWindow"`
+	InboxOnly     bool   `json:"inboxOnly"`
+}
+
+type syncHealthRequest struct {
+	Mailbox        string `json:"mailbox"`
+	TargetMessages int    `json:"targetMessages"`
+	InboxOnly      bool   `json:"inboxOnly"`
 }
 
 func mailboxArg(mailbox string, inboxOnly bool) string {

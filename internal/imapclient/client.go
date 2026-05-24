@@ -70,6 +70,23 @@ type MailboxDiagnostics struct {
 	Warnings         []string `json:"warnings,omitempty"`
 }
 
+type MailboxSyncHealth struct {
+	Mailbox            string   `json:"mailbox"`
+	Exists             uint32   `json:"exists"`
+	Messages           uint32   `json:"messages"`
+	UIDNext            uint32   `json:"uidNext"`
+	UIDValidity        uint32   `json:"uidValidity"`
+	LatestUID          uint32   `json:"latestUID,omitempty"`
+	LatestDate         string   `json:"latestDate,omitempty"`
+	LatestInternalDate string   `json:"latestInternalDate,omitempty"`
+	TargetMessages     int      `json:"targetMessages,omitempty"`
+	PercentOfTarget    float64  `json:"percentOfTarget,omitempty"`
+	Healthy            bool     `json:"healthy"`
+	UsableForTriage    bool     `json:"usableForTriage"`
+	DiagnosticStatus   string   `json:"diagnosticStatus"`
+	Warnings           []string `json:"warnings,omitempty"`
+}
+
 type MessageSummary struct {
 	UID          uint32   `json:"uid"`
 	Mailbox      string   `json:"mailbox"`
@@ -250,6 +267,45 @@ func (c *Client) MailboxDiagnostics(mailbox string) (*MailboxDiagnostics, error)
 	diag.FetchByUIDOK = true
 	finalizeDiagnostics(diag)
 	return diag, nil
+}
+
+func (c *Client) MailboxSyncHealth(mailbox string, targetMessages int) (*MailboxSyncHealth, error) {
+	diag, err := c.MailboxDiagnostics(mailbox)
+	if err != nil {
+		return nil, err
+	}
+	health := &MailboxSyncHealth{
+		Mailbox:          diag.Mailbox,
+		Exists:           diag.Exists,
+		Messages:         diag.Messages,
+		UIDNext:          diag.UIDNext,
+		UIDValidity:      diag.UIDValidity,
+		TargetMessages:   targetMessages,
+		Healthy:          diag.Healthy,
+		UsableForTriage:  diag.UsableForTriage,
+		DiagnosticStatus: diag.DiagnosticStatus,
+		Warnings:         append([]string{}, diag.Warnings...),
+	}
+	if targetMessages > 0 {
+		health.PercentOfTarget = float64(diag.Messages) / float64(targetMessages) * 100
+		if diag.Messages < uint32(targetMessages) {
+			health.Warnings = append(health.Warnings, "mailbox message count is below targetMessages")
+		}
+	}
+	if diag.SelectOK && diag.Exists > 0 {
+		sample, err := c.SampleRecentHeaders(diag.Mailbox, 1)
+		if err != nil {
+			health.Warnings = append(health.Warnings, "latest header sample failed: "+err.Error())
+			return health, nil
+		}
+		if len(sample.Results) > 0 {
+			latest := sample.Results[0]
+			health.LatestUID = latest.UID
+			health.LatestDate = latest.Date
+			health.LatestInternalDate = latest.InternalDate
+		}
+	}
+	return health, nil
 }
 
 func (c *Client) FetchEmail(mailbox string, uid uint32) (*emailparse.Email, error) {

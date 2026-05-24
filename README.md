@@ -24,12 +24,15 @@ By default, this project is read-only. It does not delete, move, expunge, mark r
 - `search_to`
 - `search_since`
 - `scan_headers_range`
+- `count_date_window`
+- `search_body`
+- `mailbox_sync_health`
 
 `fetch_email` returns parsed text and HTML bodies plus attachment metadata only. Attachments are not saved.
 
 Search-style tools return an object with `results`, `returned`, `hasMore`, `truncated`, and `warnings`. If `maxResults` is omitted, the configured `imap.max_results` default is used. If `maxResults` is provided, that explicit value is honored for admin/reporting workflows.
 
-For large mailbox audits, prefer `mailbox_diagnostics` plus `scan_headers_range` over one-shot search calls. `scan_headers_range` pages compact header records by UID window and returns `hasMore`, `nextBeforeUID`, `cursor`, `uidValidity`, `uidNext`, `scannedMessages`, and `warnings` so clients can resume safely without assuming a small response is complete.
+For large mailbox audits, prefer `mailbox_diagnostics`, `count_date_window`, and paged `scan_headers_range` over one-shot search calls. `scan_headers_range` pages compact header records by UID window and returns `hasMore`, `nextBeforeUID`, `cursor`, `uidValidity`, `uidNext`, `scannedMessages`, and `warnings` so clients can resume safely without assuming a small response is complete.
 
 ## Ubuntu 22.04 Setup
 
@@ -199,10 +202,11 @@ curl -s http://127.0.0.1:8095/mcp \
 Recommended response-needed audit workflow for large mailboxes:
 
 1. Run `mailbox_diagnostics` for the target mailbox. Continue only if `usableForTriage` is true. If `diagnosticStatus` says the mailbox is empty, unselectable, or UID fetch failed, fix that mailbox before auditing it.
-2. Call `scan_headers_range` with a modest `limit`, such as `100` to `300`, and a UID window sized for the mailbox, such as `1000` to `5000`. Include `startDate` for the audit date and optionally filters like `senderDomain`, `from`, `to`, `unreadOnly`, or `hasReplyHeaders`.
-3. Give only the returned `headers` array to the LLM for triage. These records include UID, mailbox, date, from, to, subject, message ID, in-reply-to, references, flags, and size without full bodies.
-4. If `hasMore` is true, call `scan_headers_range` again with `cursor`. Repeat until `complete` is true, or until `stopReason` is `stopped_at_date_threshold` when using `stopAtDateThreshold`.
-5. Shortlist likely response-needed messages by UID. Fetch full content only for those candidates with `fetch_email`.
+2. Call `count_date_window` first when you need an exact count for a date range. It scans by UID without assuming dates are monotonic, and supports `collapseThreads` for thread-level counts.
+3. Call `scan_headers_range` with a modest `limit`, such as `100` to `300`, and a UID window sized for the mailbox, such as `1000` to `5000`. Include `startDate` for the audit date and optionally filters like `senderDomain`, `from`, `to`, `unreadOnly`, `hasReplyHeaders`, or `collapseThreads`.
+4. Give only the returned `headers` array to the LLM for triage. These records include UID, mailbox, date, from, to, subject, message ID, in-reply-to, references, flags, and size without full bodies.
+5. If `hasMore` is true, call `scan_headers_range` again with `cursor`. Repeat until `complete` is true.
+6. Shortlist likely response-needed messages by UID. Fetch full content only for those candidates with `fetch_email`, or use `search_body` for targeted literal or regex body searches.
 
 For a "May 1 forward" audit with limited LLM context, use chunks:
 
@@ -238,6 +242,45 @@ Then fetch only shortlisted UIDs:
 ```
 
 `scan_headers_range` is intentionally page-oriented. A response with `truncated: true` is not complete; resume with `cursor` or `nextBeforeUID`.
+
+Exact date-window count:
+
+```json
+{
+  "name": "count_date_window",
+  "arguments": {
+    "mailbox": "AllMail",
+    "startDate": "2026-05-01",
+    "endDate": "2026-05-31",
+    "collapseThreads": true
+  }
+}
+```
+
+Targeted body regex search:
+
+```json
+{
+  "name": "search_body",
+  "arguments": {
+    "mailbox": "AllMail",
+    "pattern": "\\b787[-. ]?\\d{3}[-. ]?\\d{4}\\b",
+    "regex": true,
+    "startDate": "2026-05-01",
+    "limit": 20,
+    "uidWindow": 500
+  }
+}
+```
+
+Sync health and optional import progress:
+
+```json
+{
+  "name": "mailbox_sync_health",
+  "arguments": {"mailbox": "AllMail", "targetMessages": 250000}
+}
+```
 
 ## Python Test Client
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 )
 
 const headerBatchSize = 200
+const bodySearchBatchSize = 25
 const defaultHeaderScanLimit = 200
 const defaultUIDWindow = 1000
 
@@ -56,7 +58,37 @@ type HeaderScanQuery struct {
 	SenderDomain        string
 	UnreadOnly          bool
 	HasReplyHeaders     bool
+	CollapseThreads     bool
 	StopAtDateThreshold bool
+}
+
+type DateWindowCountQuery struct {
+	Mailbox         string
+	StartDate       string
+	EndDate         string
+	BeforeUID       uint32
+	AfterUID        uint32
+	UIDWindow       int
+	From            string
+	To              string
+	SenderDomain    string
+	UnreadOnly      bool
+	HasReplyHeaders bool
+	CollapseThreads bool
+}
+
+type BodySearchQuery struct {
+	Mailbox       string
+	Pattern       string
+	Regex         bool
+	CaseSensitive bool
+	StartDate     string
+	EndDate       string
+	BeforeUID     uint32
+	AfterUID      uint32
+	Cursor        string
+	Limit         int
+	UIDWindow     int
 }
 
 type HeaderScanResult struct {
@@ -75,6 +107,8 @@ type HeaderScanResult struct {
 	ScannedUIDLow   uint32           `json:"scannedUIDLow,omitempty"`
 	ScannedMessages int              `json:"scannedMessages"`
 	Returned        int              `json:"returned"`
+	CollapseThreads bool             `json:"collapseThreads,omitempty"`
+	ThreadsSeen     int              `json:"threadsSeen,omitempty"`
 	HasMore         bool             `json:"hasMore"`
 	Complete        bool             `json:"complete"`
 	Truncated       bool             `json:"truncated"`
@@ -83,12 +117,73 @@ type HeaderScanResult struct {
 	Headers         []MessageSummary `json:"headers"`
 }
 
+type DateWindowCountResult struct {
+	Mailbox         string   `json:"mailbox"`
+	UIDValidity     uint32   `json:"uidValidity"`
+	UIDNext         uint32   `json:"uidNext"`
+	Exists          uint32   `json:"exists"`
+	StartDate       string   `json:"startDate"`
+	EndDate         string   `json:"endDate,omitempty"`
+	BeforeUID       uint32   `json:"beforeUID,omitempty"`
+	AfterUID        uint32   `json:"afterUID,omitempty"`
+	NextBeforeUID   uint32   `json:"nextBeforeUID,omitempty"`
+	UIDWindow       int      `json:"uidWindow,omitempty"`
+	ScannedUIDHigh  uint32   `json:"scannedUIDHigh,omitempty"`
+	ScannedUIDLow   uint32   `json:"scannedUIDLow,omitempty"`
+	ScannedMessages int      `json:"scannedMessages"`
+	MatchedMessages int      `json:"matchedMessages"`
+	CollapseThreads bool     `json:"collapseThreads,omitempty"`
+	MatchedThreads  int      `json:"matchedThreads,omitempty"`
+	Complete        bool     `json:"complete"`
+	Truncated       bool     `json:"truncated"`
+	StopReason      string   `json:"stopReason"`
+	Warnings        []string `json:"warnings,omitempty"`
+}
+
+type BodySearchResult struct {
+	Mailbox         string            `json:"mailbox"`
+	UIDValidity     uint32            `json:"uidValidity"`
+	UIDNext         uint32            `json:"uidNext"`
+	Exists          uint32            `json:"exists"`
+	Pattern         string            `json:"pattern"`
+	Regex           bool              `json:"regex"`
+	CaseSensitive   bool              `json:"caseSensitive"`
+	StartDate       string            `json:"startDate,omitempty"`
+	EndDate         string            `json:"endDate,omitempty"`
+	BeforeUID       uint32            `json:"beforeUID,omitempty"`
+	AfterUID        uint32            `json:"afterUID,omitempty"`
+	NextBeforeUID   uint32            `json:"nextBeforeUID,omitempty"`
+	Cursor          string            `json:"cursor,omitempty"`
+	Limit           int               `json:"limit"`
+	UIDWindow       int               `json:"uidWindow"`
+	ScannedUIDHigh  uint32            `json:"scannedUIDHigh,omitempty"`
+	ScannedUIDLow   uint32            `json:"scannedUIDLow,omitempty"`
+	ScannedMessages int               `json:"scannedMessages"`
+	Returned        int               `json:"returned"`
+	HasMore         bool              `json:"hasMore"`
+	Complete        bool              `json:"complete"`
+	Truncated       bool              `json:"truncated"`
+	StopReason      string            `json:"stopReason"`
+	Warnings        []string          `json:"warnings,omitempty"`
+	Matches         []BodySearchMatch `json:"matches"`
+}
+
+type BodySearchMatch struct {
+	MessageSummary
+	Snippet string `json:"snippet,omitempty"`
+}
+
 type scanCursor struct {
 	Mailbox     string `json:"mailbox"`
 	UIDValidity uint32 `json:"uidValidity"`
 	BeforeUID   uint32 `json:"beforeUID"`
 	AfterUID    uint32 `json:"afterUID,omitempty"`
 	StartDate   string `json:"startDate,omitempty"`
+}
+
+type bodySearchMessage struct {
+	Summary MessageSummary
+	Body    []byte
 }
 
 func (c *Client) SearchBySubject(q SearchQuery) (*SearchResult, error) {
@@ -176,16 +271,303 @@ func (c *Client) ScanHeadersRange(q HeaderScanQuery) (*HeaderScanResult, error) 
 	}
 
 	result := &HeaderScanResult{
-		Mailbox:     mailbox,
-		UIDValidity: selectData.UIDValidity,
-		UIDNext:     uint32(selectData.UIDNext),
-		Exists:      selectData.NumMessages,
-		StartDate:   q.StartDate,
-		BeforeUID:   q.BeforeUID,
-		AfterUID:    q.AfterUID,
-		Limit:       limit,
-		UIDWindow:   uidWindow,
-		Headers:     []MessageSummary{},
+		Mailbox:         mailbox,
+		UIDValidity:     selectData.UIDValidity,
+		UIDNext:         uint32(selectData.UIDNext),
+		Exists:          selectData.NumMessages,
+		StartDate:       q.StartDate,
+		BeforeUID:       q.BeforeUID,
+		AfterUID:        q.AfterUID,
+		Limit:           limit,
+		UIDWindow:       uidWindow,
+		CollapseThreads: q.CollapseThreads,
+		Headers:         []MessageSummary{},
+	}
+	if q.StopAtDateThreshold {
+		result.Warnings = append(result.Warnings, "stopAtDateThreshold is ignored because message dates are not guaranteed to be monotonic by UID")
+	}
+	if q.Cursor != "" {
+		cursor, _ := decodeScanCursor(q.Cursor)
+		if cursor.UIDValidity != 0 && cursor.UIDValidity != result.UIDValidity {
+			return nil, fmt.Errorf("cursor uidValidity %d no longer matches mailbox uidValidity %d", cursor.UIDValidity, result.UIDValidity)
+		}
+	}
+	if selectData.NumMessages == 0 || selectData.UIDNext <= 1 {
+		result.Complete = true
+		result.StopReason = "empty_mailbox"
+		return result, nil
+	}
+
+	high := uint32(selectData.UIDNext) - 1
+	if q.BeforeUID > 0 && q.BeforeUID <= high+1 {
+		high = q.BeforeUID - 1
+	}
+	if high <= q.AfterUID {
+		result.Complete = true
+		result.StopReason = "uid_range_exhausted"
+		return result, nil
+	}
+	result.ScannedUIDHigh = high
+
+	currentHigh := high
+	remainingUIDs := uidWindow
+	lowestProcessed := uint32(0)
+	stopReason := "uid_range_exhausted"
+	seenThreads := map[string]struct{}{}
+
+scanLoop:
+	for currentHigh > q.AfterUID && remainingUIDs > 0 {
+		batchLow, actualSpan, ok := nextUIDBatch(currentHigh, q.AfterUID, remainingUIDs)
+		if !ok {
+			break
+		}
+		summaries, err := fetchHeaderSummariesByUIDRange(ic, mailbox, imap.UID(batchLow), imap.UID(currentHigh))
+		if err != nil {
+			return nil, err
+		}
+		for _, summary := range summaries {
+			lowestProcessed = summary.UID
+			result.ScannedMessages++
+			if headerMatches(summary, q, start) {
+				if q.CollapseThreads {
+					key := threadKey(summary)
+					if _, ok := seenThreads[key]; ok {
+						continue
+					}
+					seenThreads[key] = struct{}{}
+				}
+				result.Headers = append(result.Headers, summary)
+				if len(result.Headers) >= limit {
+					stopReason = "limit_reached"
+					break scanLoop
+				}
+			}
+		}
+		if lowestProcessed == 0 || lowestProcessed > batchLow {
+			lowestProcessed = batchLow
+		}
+		currentHigh = batchLow - 1
+		remainingUIDs -= actualSpan
+	}
+
+	if lowestProcessed == 0 {
+		lowestProcessed = currentHigh
+	}
+	if stopReason == "uid_range_exhausted" && currentHigh > q.AfterUID && remainingUIDs == 0 {
+		stopReason = "uid_window_exhausted"
+	}
+	result.ScannedUIDLow = lowestProcessed
+	result.Returned = len(result.Headers)
+	result.ThreadsSeen = len(seenThreads)
+	result.StopReason = stopReason
+
+	switch stopReason {
+	case "limit_reached", "uid_window_exhausted":
+		result.NextBeforeUID = lowestProcessed
+	case "uid_range_exhausted":
+		result.NextBeforeUID = currentHigh + 1
+	default:
+		result.NextBeforeUID = lowestProcessed
+	}
+
+	if result.NextBeforeUID > q.AfterUID+1 {
+		result.HasMore = true
+		result.Truncated = true
+		result.StopReason = stopReason
+	} else {
+		result.Complete = true
+		result.StopReason = "uid_range_exhausted"
+	}
+
+	if result.HasMore {
+		cursor := scanCursor{
+			Mailbox:     mailbox,
+			UIDValidity: result.UIDValidity,
+			BeforeUID:   result.NextBeforeUID,
+			AfterUID:    q.AfterUID,
+			StartDate:   q.StartDate,
+		}
+		result.Cursor = encodeScanCursor(cursor)
+		result.Warnings = append(result.Warnings, "result is a page, not a complete audit; resume with cursor or nextBeforeUID")
+		if q.CollapseThreads {
+			result.Warnings = append(result.Warnings, "thread collapse is scoped to this page; use count_date_window with collapseThreads for mailbox-wide collapsed counts")
+		}
+	}
+
+	log.Printf("scan_headers_range mailbox=%s uid_high=%d uid_low=%d scanned_messages=%d returned=%d has_more=%t",
+		mailbox, result.ScannedUIDHigh, result.ScannedUIDLow, result.ScannedMessages, result.Returned, result.HasMore)
+	return result, nil
+}
+
+func (c *Client) CountDateWindow(q DateWindowCountQuery) (*DateWindowCountResult, error) {
+	mailbox := c.mailbox(q.Mailbox)
+	start, endExclusive, err := parseDateWindow(q.StartDate, q.EndDate)
+	if err != nil {
+		return nil, err
+	}
+
+	ic, err := c.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer closeClient(ic)
+
+	selectData, err := selectMailbox(ic, mailbox)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &DateWindowCountResult{
+		Mailbox:         mailbox,
+		UIDValidity:     selectData.UIDValidity,
+		UIDNext:         uint32(selectData.UIDNext),
+		Exists:          selectData.NumMessages,
+		StartDate:       q.StartDate,
+		EndDate:         q.EndDate,
+		BeforeUID:       q.BeforeUID,
+		AfterUID:        q.AfterUID,
+		UIDWindow:       q.UIDWindow,
+		CollapseThreads: q.CollapseThreads,
+	}
+	if selectData.NumMessages == 0 || selectData.UIDNext <= 1 {
+		result.Complete = true
+		result.StopReason = "empty_mailbox"
+		return result, nil
+	}
+
+	high := uint32(selectData.UIDNext) - 1
+	if q.BeforeUID > 0 && q.BeforeUID <= high+1 {
+		high = q.BeforeUID - 1
+	}
+	if high <= q.AfterUID {
+		result.Complete = true
+		result.StopReason = "uid_range_exhausted"
+		return result, nil
+	}
+	result.ScannedUIDHigh = high
+
+	currentHigh := high
+	remainingUIDs := 0
+	if q.UIDWindow > 0 {
+		remainingUIDs = q.UIDWindow
+	}
+	lowestProcessed := uint32(0)
+	threads := map[string]struct{}{}
+	stopReason := "uid_range_exhausted"
+
+	for currentHigh > q.AfterUID {
+		batchLimit := headerBatchSize
+		if remainingUIDs > 0 {
+			batchLimit = remainingUIDs
+		}
+		batchLow, actualSpan, ok := nextUIDBatch(currentHigh, q.AfterUID, batchLimit)
+		if !ok {
+			break
+		}
+		summaries, err := fetchHeaderSummariesByUIDRange(ic, mailbox, imap.UID(batchLow), imap.UID(currentHigh))
+		if err != nil {
+			return nil, err
+		}
+		for _, summary := range summaries {
+			lowestProcessed = summary.UID
+			result.ScannedMessages++
+			if headerMatchesDateWindow(summary, q, start, endExclusive) {
+				result.MatchedMessages++
+				if q.CollapseThreads {
+					threads[threadKey(summary)] = struct{}{}
+				}
+			}
+		}
+		if lowestProcessed == 0 || lowestProcessed > batchLow {
+			lowestProcessed = batchLow
+		}
+		currentHigh = batchLow - 1
+		if remainingUIDs > 0 {
+			remainingUIDs -= actualSpan
+			if remainingUIDs == 0 && currentHigh > q.AfterUID {
+				stopReason = "uid_window_exhausted"
+				break
+			}
+		}
+	}
+
+	result.ScannedUIDLow = lowestProcessed
+	result.MatchedThreads = len(threads)
+	result.StopReason = stopReason
+	if stopReason == "uid_window_exhausted" {
+		result.NextBeforeUID = lowestProcessed
+		result.Truncated = true
+		result.Warnings = append(result.Warnings, "count stopped at uidWindow; rerun with beforeUID below scannedUIDLow or omit uidWindow for an exact count")
+	} else {
+		result.Complete = true
+		result.StopReason = "uid_range_exhausted"
+	}
+	return result, nil
+}
+
+func (c *Client) SearchBody(q BodySearchQuery) (*BodySearchResult, error) {
+	mailbox := c.mailbox(q.Mailbox)
+	if q.Cursor != "" {
+		cursor, err := decodeScanCursor(q.Cursor)
+		if err != nil {
+			return nil, err
+		}
+		if cursor.Mailbox != "" {
+			mailbox = cursor.Mailbox
+		}
+		q.BeforeUID = cursor.BeforeUID
+		q.AfterUID = cursor.AfterUID
+		if q.StartDate == "" {
+			q.StartDate = cursor.StartDate
+		}
+	}
+	if strings.TrimSpace(q.Pattern) == "" {
+		return nil, fmt.Errorf("pattern is required")
+	}
+	matcher, err := newBodyMatcher(q.Pattern, q.Regex, q.CaseSensitive)
+	if err != nil {
+		return nil, err
+	}
+	start, endExclusive, err := parseOptionalDateWindow(q.StartDate, q.EndDate)
+	if err != nil {
+		return nil, err
+	}
+
+	limit := q.Limit
+	if limit <= 0 {
+		limit = c.maxResults(0)
+	}
+	uidWindow := q.UIDWindow
+	if uidWindow <= 0 {
+		uidWindow = defaultUIDWindow
+	}
+
+	ic, err := c.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer closeClient(ic)
+
+	selectData, err := selectMailbox(ic, mailbox)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &BodySearchResult{
+		Mailbox:       mailbox,
+		UIDValidity:   selectData.UIDValidity,
+		UIDNext:       uint32(selectData.UIDNext),
+		Exists:        selectData.NumMessages,
+		Pattern:       q.Pattern,
+		Regex:         q.Regex,
+		CaseSensitive: q.CaseSensitive,
+		StartDate:     q.StartDate,
+		EndDate:       q.EndDate,
+		BeforeUID:     q.BeforeUID,
+		AfterUID:      q.AfterUID,
+		Limit:         limit,
+		UIDWindow:     uidWindow,
+		Matches:       []BodySearchMatch{},
 	}
 	if q.Cursor != "" {
 		cursor, _ := decodeScanCursor(q.Cursor)
@@ -217,29 +599,23 @@ func (c *Client) ScanHeadersRange(q HeaderScanQuery) (*HeaderScanResult, error) 
 
 scanLoop:
 	for currentHigh > q.AfterUID && remainingUIDs > 0 {
-		span := headerBatchSize
-		if remainingUIDs < span {
-			span = remainingUIDs
+		batchLow, actualSpan, ok := nextUIDBatchWithMax(currentHigh, q.AfterUID, remainingUIDs, bodySearchBatchSize)
+		if !ok {
+			break
 		}
-		batchLow := currentHigh - uint32(span) + 1
-		if batchLow <= q.AfterUID {
-			batchLow = q.AfterUID + 1
-		}
-		actualSpan := int(currentHigh - batchLow + 1)
-		summaries, err := fetchHeaderSummariesByUIDRange(ic, mailbox, imap.UID(batchLow), imap.UID(currentHigh))
+		messages, err := fetchBodySearchMessagesByUIDRange(ic, mailbox, imap.UID(batchLow), imap.UID(currentHigh))
 		if err != nil {
 			return nil, err
 		}
-		for _, summary := range summaries {
-			lowestProcessed = summary.UID
+		for _, message := range messages {
+			lowestProcessed = message.Summary.UID
 			result.ScannedMessages++
-			if q.StopAtDateThreshold && !start.IsZero() && !summaryOnOrAfter(summary, start) {
-				stopReason = "stopped_at_date_threshold"
-				break scanLoop
+			if !summaryInDateWindow(message.Summary, start, endExclusive) {
+				continue
 			}
-			if headerMatches(summary, q, start) {
-				result.Headers = append(result.Headers, summary)
-				if len(result.Headers) >= limit {
+			if snippet, ok := matcher.snippet(message.Body); ok {
+				result.Matches = append(result.Matches, BodySearchMatch{MessageSummary: message.Summary, Snippet: snippet})
+				if len(result.Matches) >= limit {
 					stopReason = "limit_reached"
 					break scanLoop
 				}
@@ -259,44 +635,31 @@ scanLoop:
 		stopReason = "uid_window_exhausted"
 	}
 	result.ScannedUIDLow = lowestProcessed
-	result.Returned = len(result.Headers)
+	result.Returned = len(result.Matches)
 	result.StopReason = stopReason
-
 	switch stopReason {
-	case "limit_reached", "stopped_at_date_threshold", "uid_window_exhausted":
+	case "limit_reached", "uid_window_exhausted":
 		result.NextBeforeUID = lowestProcessed
 	case "uid_range_exhausted":
 		result.NextBeforeUID = currentHigh + 1
 	default:
 		result.NextBeforeUID = lowestProcessed
 	}
-
-	if stopReason == "stopped_at_date_threshold" {
-		result.Complete = true
-		result.Warnings = append(result.Warnings, "scan stopped early at date threshold; use without stopAtDateThreshold for exhaustive UID traversal")
-	} else if result.NextBeforeUID > q.AfterUID+1 {
+	if result.NextBeforeUID > q.AfterUID+1 {
 		result.HasMore = true
 		result.Truncated = true
-		result.StopReason = stopReason
-	} else {
-		result.Complete = true
-		result.StopReason = "uid_range_exhausted"
-	}
-
-	if result.HasMore {
-		cursor := scanCursor{
+		result.Cursor = encodeScanCursor(scanCursor{
 			Mailbox:     mailbox,
 			UIDValidity: result.UIDValidity,
 			BeforeUID:   result.NextBeforeUID,
 			AfterUID:    q.AfterUID,
 			StartDate:   q.StartDate,
-		}
-		result.Cursor = encodeScanCursor(cursor)
-		result.Warnings = append(result.Warnings, "result is a page, not a complete audit; resume with cursor or nextBeforeUID")
+		})
+		result.Warnings = append(result.Warnings, "body search is page-oriented; resume with nextBeforeUID")
+	} else {
+		result.Complete = true
+		result.StopReason = "uid_range_exhausted"
 	}
-
-	log.Printf("scan_headers_range mailbox=%s uid_high=%d uid_low=%d scanned_messages=%d returned=%d has_more=%t",
-		mailbox, result.ScannedUIDHigh, result.ScannedUIDLow, result.ScannedMessages, result.Returned, result.HasMore)
 	return result, nil
 }
 
@@ -552,6 +915,38 @@ func fetchHeaderSummariesByUIDRange(c *clientlib.Client, mailbox string, startUI
 	return out, nil
 }
 
+func fetchBodySearchMessagesByUIDRange(c *clientlib.Client, mailbox string, startUID, endUID imap.UID) ([]bodySearchMessage, error) {
+	var set imap.UIDSet
+	set.AddRange(startUID, endUID)
+	bodySection := &imap.FetchItemBodySection{Peek: true}
+	options := &imap.FetchOptions{
+		UID:          true,
+		Envelope:     true,
+		Flags:        true,
+		InternalDate: true,
+		RFC822Size:   true,
+		BodySection:  []*imap.FetchItemBodySection{bodySection},
+	}
+	messages, err := c.Fetch(set, options).Collect()
+	if err != nil {
+		return nil, classifyIMAPError(err)
+	}
+
+	out := make([]bodySearchMessage, 0, len(messages))
+	for _, msg := range messages {
+		body := msg.FindBodySection(bodySection)
+		if body == nil {
+			body = []byte{}
+		}
+		out = append(out, bodySearchMessage{
+			Summary: messageSummary(mailbox, msg),
+			Body:    body,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Summary.UID > out[j].Summary.UID })
+	return out, nil
+}
+
 func messageSummary(mailbox string, msg *clientlib.FetchMessageBuffer) MessageSummary {
 	summary := MessageSummary{
 		UID:     uint32(msg.UID),
@@ -660,6 +1055,32 @@ func summaryOnOrAfter(summary MessageSummary, cutoff time.Time) bool {
 	return false
 }
 
+func summaryBefore(summary MessageSummary, cutoff time.Time) bool {
+	if cutoff.IsZero() {
+		return true
+	}
+	for _, value := range []string{summary.InternalDate, summary.Date} {
+		if value == "" {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, value)
+		if err == nil && t.Before(cutoff) {
+			return true
+		}
+	}
+	return false
+}
+
+func summaryInDateWindow(summary MessageSummary, start, endExclusive time.Time) bool {
+	if !start.IsZero() && !summaryOnOrAfter(summary, start) {
+		return false
+	}
+	if !endExclusive.IsZero() && !summaryBefore(summary, endExclusive) {
+		return false
+	}
+	return true
+}
+
 func headerMatches(summary MessageSummary, q HeaderScanQuery, start time.Time) bool {
 	if !start.IsZero() && !summaryOnOrAfter(summary, start) {
 		return false
@@ -680,6 +1101,170 @@ func headerMatches(summary MessageSummary, q HeaderScanQuery, start time.Time) b
 		return false
 	}
 	return true
+}
+
+func headerMatchesDateWindow(summary MessageSummary, q DateWindowCountQuery, start, endExclusive time.Time) bool {
+	if !summaryInDateWindow(summary, start, endExclusive) {
+		return false
+	}
+	if q.From != "" && !addressesContain(summary.From, q.From) {
+		return false
+	}
+	if q.To != "" && !addressesContain(summary.To, q.To) {
+		return false
+	}
+	if q.SenderDomain != "" && !addressesContainDomain(summary.From, q.SenderDomain) {
+		return false
+	}
+	if q.UnreadOnly && hasFlag(summary.Flags, string(imap.FlagSeen)) {
+		return false
+	}
+	if q.HasReplyHeaders && summary.InReplyTo == "" && len(summary.References) == 0 {
+		return false
+	}
+	return true
+}
+
+func parseDateWindow(startValue, endValue string) (time.Time, time.Time, error) {
+	if startValue == "" {
+		return time.Time{}, time.Time{}, fmt.Errorf("startDate is required")
+	}
+	return parseOptionalDateWindow(startValue, endValue)
+}
+
+func parseOptionalDateWindow(startValue, endValue string) (time.Time, time.Time, error) {
+	var start time.Time
+	if startValue != "" {
+		parsed, err := parseDate(startValue)
+		if err != nil {
+			return time.Time{}, time.Time{}, err
+		}
+		start = parsed
+	}
+	var endExclusive time.Time
+	if endValue != "" {
+		parsed, err := parseDate(endValue)
+		if err != nil {
+			return time.Time{}, time.Time{}, err
+		}
+		if !start.IsZero() && parsed.Before(start) {
+			return time.Time{}, time.Time{}, fmt.Errorf("endDate must be on or after startDate")
+		}
+		endExclusive = parsed.AddDate(0, 0, 1)
+	}
+	return start, endExclusive, nil
+}
+
+func nextUIDBatch(currentHigh, afterUID uint32, remainingUIDs int) (uint32, int, bool) {
+	return nextUIDBatchWithMax(currentHigh, afterUID, remainingUIDs, headerBatchSize)
+}
+
+func nextUIDBatchWithMax(currentHigh, afterUID uint32, remainingUIDs, maxBatchSize int) (uint32, int, bool) {
+	if currentHigh <= afterUID || remainingUIDs <= 0 || maxBatchSize <= 0 {
+		return 0, 0, false
+	}
+	available := currentHigh - afterUID
+	span := maxBatchSize
+	if remainingUIDs < span {
+		span = remainingUIDs
+	}
+	if uint32(span) > available {
+		span = int(available)
+	}
+	if span <= 0 {
+		return 0, 0, false
+	}
+	return currentHigh - uint32(span) + 1, span, true
+}
+
+func threadKey(summary MessageSummary) string {
+	if len(summary.References) > 0 {
+		if key := normalizeMessageID(summary.References[0]); key != "" {
+			return key
+		}
+	}
+	if key := normalizeMessageID(summary.InReplyTo); key != "" {
+		return key
+	}
+	if key := normalizeMessageID(summary.MessageID); key != "" {
+		return key
+	}
+	return fmt.Sprintf("uid:%s:%d", summary.Mailbox, summary.UID)
+}
+
+func normalizeMessageID(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+type bodyMatcher struct {
+	pattern       string
+	caseSensitive bool
+	regex         *regexp.Regexp
+}
+
+func newBodyMatcher(pattern string, regex, caseSensitive bool) (*bodyMatcher, error) {
+	if regex {
+		expr := pattern
+		if !caseSensitive {
+			expr = "(?i)" + expr
+		}
+		compiled, err := regexp.Compile(expr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid regex pattern: %w", err)
+		}
+		return &bodyMatcher{pattern: pattern, caseSensitive: caseSensitive, regex: compiled}, nil
+	}
+	if !caseSensitive {
+		pattern = strings.ToLower(pattern)
+	}
+	return &bodyMatcher{pattern: pattern, caseSensitive: caseSensitive}, nil
+}
+
+func (m *bodyMatcher) snippet(body []byte) (string, bool) {
+	text := strings.ToValidUTF8(string(body), "")
+	searchText := text
+	if !m.caseSensitive && m.regex == nil {
+		searchText = strings.ToLower(text)
+	}
+
+	start, end := -1, -1
+	if m.regex != nil {
+		loc := m.regex.FindStringIndex(text)
+		if loc == nil {
+			return "", false
+		}
+		start, end = loc[0], loc[1]
+	} else {
+		start = strings.Index(searchText, m.pattern)
+		if start < 0 {
+			return "", false
+		}
+		end = start + len(m.pattern)
+	}
+	return compactSnippet(text, start, end), true
+}
+
+func compactSnippet(text string, start, end int) string {
+	const context = 80
+	if start < 0 || end < start {
+		return ""
+	}
+	lo := start - context
+	if lo < 0 {
+		lo = 0
+	}
+	hi := end + context
+	if hi > len(text) {
+		hi = len(text)
+	}
+	snippet := strings.Join(strings.Fields(text[lo:hi]), " ")
+	if lo > 0 {
+		snippet = "..." + snippet
+	}
+	if hi < len(text) {
+		snippet += "..."
+	}
+	return snippet
 }
 
 func addressesContain(addresses []string, needle string) bool {
