@@ -79,3 +79,56 @@ func TestSubjectMatchesRejectsMissingTerm(t *testing.T) {
 		t.Fatal("expected missing Summary term not to match")
 	}
 }
+
+func TestScanCursorRoundTrip(t *testing.T) {
+	want := scanCursor{
+		Mailbox:     "AllMail",
+		UIDValidity: 123,
+		BeforeUID:   456,
+		AfterUID:    10,
+		StartDate:   "2026-05-01",
+	}
+
+	got, err := decodeScanCursor(encodeScanCursor(want))
+	if err != nil {
+		t.Fatalf("decodeScanCursor returned error: %v", err)
+	}
+	if got != want {
+		t.Fatalf("cursor round trip = %#v, want %#v", got, want)
+	}
+}
+
+func TestHeaderMatchesFiltersSenderDomainAndUnread(t *testing.T) {
+	summary := MessageSummary{
+		From:         []string{"Example Sender <person@alerts.example.com>"},
+		InternalDate: "2026-05-20T12:00:00Z",
+	}
+	query := HeaderScanQuery{SenderDomain: "example.com", UnreadOnly: true}
+	cutoff := time.Date(2026, time.May, 1, 0, 0, 0, 0, time.UTC)
+
+	if !headerMatches(summary, query, cutoff) {
+		t.Fatal("expected unread message from matching sender domain to pass")
+	}
+
+	summary.Flags = []string{"\\Seen"}
+	if headerMatches(summary, query, cutoff) {
+		t.Fatal("expected seen message to be rejected when unreadOnly is true")
+	}
+}
+
+func TestApplyThreadHeaders(t *testing.T) {
+	raw := []byte("Message-ID: <m1@example.com>\r\nIn-Reply-To: <m0@example.com>\r\nReferences: <m0@example.com> <root@example.com>\r\n\r\n")
+	var summary MessageSummary
+
+	applyThreadHeaders(&summary, raw)
+
+	if summary.MessageID != "<m1@example.com>" {
+		t.Fatalf("MessageID = %q", summary.MessageID)
+	}
+	if summary.InReplyTo != "<m0@example.com>" {
+		t.Fatalf("InReplyTo = %q", summary.InReplyTo)
+	}
+	if len(summary.References) != 2 {
+		t.Fatalf("References length = %d, want 2: %#v", len(summary.References), summary.References)
+	}
+}

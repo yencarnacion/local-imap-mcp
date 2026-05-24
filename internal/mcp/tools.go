@@ -37,6 +37,14 @@ func Tools() []Tool {
 			}),
 		},
 		{
+			Name:        "mailbox_diagnostics",
+			Description: "Run mailbox preflight diagnostics: LIST, STATUS, SELECT, flags, UID metadata, and sample fetch-by-UID health.",
+			InputSchema: objectSchema(map[string]any{
+				"mailbox":   stringSchema(),
+				"inboxOnly": boolSchema(),
+			}),
+		},
+		{
 			Name:        "sample_recent_headers",
 			Description: "Fetch the newest message headers by sequence number for a mailbox.",
 			InputSchema: objectSchema(map[string]any{
@@ -114,6 +122,26 @@ func Tools() []Tool {
 				"inboxOnly":  boolSchema(),
 			}, "startDate"),
 		},
+		{
+			Name:        "scan_headers_range",
+			Description: "Page compact headers newest-to-oldest by stable UID windows. Returns hasMore, nextBeforeUID, cursor, UIDVALIDITY, flags, and thread headers for exhaustive audits.",
+			InputSchema: objectSchema(map[string]any{
+				"mailbox":             stringSchema(),
+				"startDate":           stringSchema(),
+				"beforeUID":           intSchema(),
+				"afterUID":            intSchema(),
+				"cursor":              stringSchema(),
+				"limit":               intSchema(),
+				"uidWindow":           intSchema(),
+				"from":                stringSchema(),
+				"to":                  stringSchema(),
+				"senderDomain":        stringSchema(),
+				"unreadOnly":          boolSchema(),
+				"hasReplyHeaders":     boolSchema(),
+				"stopAtDateThreshold": boolSchema(),
+				"inboxOnly":           boolSchema(),
+			}),
+		},
 	}
 }
 
@@ -127,6 +155,12 @@ func (r *ToolRunner) Call(name string, args json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return r.imap.CountMessages(mailboxArg(req.Mailbox, req.InboxOnly))
+	case "mailbox_diagnostics":
+		var req mailboxRequest
+		if err := decodeArgs(args, &req); err != nil {
+			return nil, err
+		}
+		return r.imap.MailboxDiagnostics(mailboxArg(req.Mailbox, req.InboxOnly))
 	case "sample_recent_headers":
 		var req sampleHeadersRequest
 		if err := decodeArgs(args, &req); err != nil {
@@ -203,6 +237,26 @@ func (r *ToolRunner) Call(name string, args json.RawMessage) (any, error) {
 		return r.imap.SearchSince(imapclient.SearchQuery{
 			Mailbox: mailboxArg(req.Mailbox, req.InboxOnly), StartDate: req.StartDate, MaxResults: req.MaxResults,
 		})
+	case "scan_headers_range":
+		var req scanHeadersRangeRequest
+		if err := decodeArgs(args, &req); err != nil {
+			return nil, err
+		}
+		return r.imap.ScanHeadersRange(imapclient.HeaderScanQuery{
+			Mailbox:             mailboxArg(req.Mailbox, req.InboxOnly),
+			StartDate:           req.StartDate,
+			BeforeUID:           req.BeforeUID,
+			AfterUID:            req.AfterUID,
+			Cursor:              req.Cursor,
+			Limit:               req.Limit,
+			UIDWindow:           req.UIDWindow,
+			From:                req.From,
+			To:                  req.To,
+			SenderDomain:        req.SenderDomain,
+			UnreadOnly:          req.UnreadOnly,
+			HasReplyHeaders:     req.HasReplyHeaders,
+			StopAtDateThreshold: req.StopAtDateThreshold,
+		})
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -260,6 +314,23 @@ type sinceRequest struct {
 	StartDate  string `json:"startDate"`
 	MaxResults int    `json:"maxResults"`
 	InboxOnly  bool   `json:"inboxOnly"`
+}
+
+type scanHeadersRangeRequest struct {
+	Mailbox             string `json:"mailbox"`
+	StartDate           string `json:"startDate"`
+	BeforeUID           uint32 `json:"beforeUID"`
+	AfterUID            uint32 `json:"afterUID"`
+	Cursor              string `json:"cursor"`
+	Limit               int    `json:"limit"`
+	UIDWindow           int    `json:"uidWindow"`
+	From                string `json:"from"`
+	To                  string `json:"to"`
+	SenderDomain        string `json:"senderDomain"`
+	UnreadOnly          bool   `json:"unreadOnly"`
+	HasReplyHeaders     bool   `json:"hasReplyHeaders"`
+	StopAtDateThreshold bool   `json:"stopAtDateThreshold"`
+	InboxOnly           bool   `json:"inboxOnly"`
 }
 
 func mailboxArg(mailbox string, inboxOnly bool) string {

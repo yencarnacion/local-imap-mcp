@@ -14,6 +14,7 @@ By default, this project is read-only. It does not delete, move, expunge, mark r
 
 - `list_mailboxes`
 - `count_messages`
+- `mailbox_diagnostics`
 - `sample_recent_headers`
 - `search_by_subject`
 - `search_recent`
@@ -22,8 +23,13 @@ By default, this project is read-only. It does not delete, move, expunge, mark r
 - `search_from`
 - `search_to`
 - `search_since`
+- `scan_headers_range`
 
 `fetch_email` returns parsed text and HTML bodies plus attachment metadata only. Attachments are not saved.
+
+Search-style tools return an object with `results`, `returned`, `hasMore`, `truncated`, and `warnings`. If `maxResults` is omitted, the configured `imap.max_results` default is used. If `maxResults` is provided, that explicit value is honored for admin/reporting workflows.
+
+For large mailbox audits, prefer `mailbox_diagnostics` plus `scan_headers_range` over one-shot search calls. `scan_headers_range` pages compact header records by UID window and returns `hasMore`, `nextBeforeUID`, `cursor`, `uidValidity`, `uidNext`, `scannedMessages`, and `warnings` so clients can resume safely without assuming a small response is complete.
 
 ## Ubuntu 22.04 Setup
 
@@ -116,12 +122,20 @@ curl -s http://127.0.0.1:8095/mcp \
   -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"count_messages","arguments":{"mailbox":"AllMail"}}}' | jq
 ```
 
+Run mailbox health diagnostics before triage:
+
+```bash
+curl -s http://127.0.0.1:8095/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"mailbox_diagnostics","arguments":{"mailbox":"AllMail"}}}' | jq
+```
+
 Sample recent headers from `AllMail`:
 
 ```bash
 curl -s http://127.0.0.1:8095/mcp \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"sample_recent_headers","arguments":{"mailbox":"AllMail","limit":10}}}' | jq
+  -d '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"sample_recent_headers","arguments":{"mailbox":"AllMail","limit":10}}}' | jq
 ```
 
 Search recent mail in the default `AllMail` mailbox:
@@ -129,7 +143,7 @@ Search recent mail in the default `AllMail` mailbox:
 ```bash
 curl -s http://127.0.0.1:8095/mcp \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"search_recent","arguments":{"mailbox":"AllMail","days":7,"maxResults":10}}}' | jq
+  -d '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"search_recent","arguments":{"mailbox":"AllMail","days":7,"maxResults":10}}}' | jq
 ```
 
 Search `AllMail` since a date:
@@ -137,7 +151,7 @@ Search `AllMail` since a date:
 ```bash
 curl -s http://127.0.0.1:8095/mcp \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"search_since","arguments":{"mailbox":"AllMail","startDate":"2026-05-20","maxResults":20}}}' | jq
+  -d '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"search_since","arguments":{"mailbox":"AllMail","startDate":"2026-05-20","maxResults":20}}}' | jq
 ```
 
 Search subject:
@@ -145,7 +159,7 @@ Search subject:
 ```bash
 curl -s http://127.0.0.1:8095/mcp \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"search_by_subject","arguments":{"mailbox":"AllMail","subject":"Online Reading Summary","maxResults":20}}}' | jq
+  -d '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"search_by_subject","arguments":{"mailbox":"AllMail","subject":"Online Reading Summary","maxResults":20}}}' | jq
 ```
 
 Fetch one message:
@@ -153,7 +167,7 @@ Fetch one message:
 ```bash
 curl -s http://127.0.0.1:8095/mcp \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"fetch_email","arguments":{"mailbox":"AllMail","uid":123}}}' | jq
+  -d '{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"fetch_email","arguments":{"mailbox":"AllMail","uid":123}}}' | jq
 ```
 
 Get headers only:
@@ -161,8 +175,69 @@ Get headers only:
 ```bash
 curl -s http://127.0.0.1:8095/mcp \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"get_email_headers","arguments":{"mailbox":"AllMail","uid":123}}}' | jq
+  -d '{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"get_email_headers","arguments":{"mailbox":"AllMail","uid":123}}}' | jq
 ```
+
+Page compact headers by UID window:
+
+```bash
+curl -s http://127.0.0.1:8095/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"scan_headers_range","arguments":{"mailbox":"AllMail","startDate":"2026-05-01","limit":200,"uidWindow":2000}}}' | jq
+```
+
+Resume the scan using the returned `cursor`:
+
+```bash
+curl -s http://127.0.0.1:8095/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"scan_headers_range","arguments":{"cursor":"PASTE_RETURNED_CURSOR_HERE","limit":200,"uidWindow":2000}}}' | jq
+```
+
+## Exhaustive Mailbox Audits
+
+Recommended response-needed audit workflow for large mailboxes:
+
+1. Run `mailbox_diagnostics` for the target mailbox. Continue only if `usableForTriage` is true. If `diagnosticStatus` says the mailbox is empty, unselectable, or UID fetch failed, fix that mailbox before auditing it.
+2. Call `scan_headers_range` with a modest `limit`, such as `100` to `300`, and a UID window sized for the mailbox, such as `1000` to `5000`. Include `startDate` for the audit date and optionally filters like `senderDomain`, `from`, `to`, `unreadOnly`, or `hasReplyHeaders`.
+3. Give only the returned `headers` array to the LLM for triage. These records include UID, mailbox, date, from, to, subject, message ID, in-reply-to, references, flags, and size without full bodies.
+4. If `hasMore` is true, call `scan_headers_range` again with `cursor`. Repeat until `complete` is true, or until `stopReason` is `stopped_at_date_threshold` when using `stopAtDateThreshold`.
+5. Shortlist likely response-needed messages by UID. Fetch full content only for those candidates with `fetch_email`.
+
+For a "May 1 forward" audit with limited LLM context, use chunks:
+
+```json
+{
+  "name": "scan_headers_range",
+  "arguments": {
+    "mailbox": "AllMail",
+    "startDate": "2026-05-01",
+    "limit": 150,
+    "uidWindow": 3000,
+    "unreadOnly": false
+  }
+}
+```
+
+After each page, ask the LLM to return only a compact shortlist such as:
+
+```json
+[
+  {"mailbox": "AllMail", "uid": 12345, "reason": "direct question from client"},
+  {"mailbox": "AllMail", "uid": 12312, "reason": "unanswered scheduling request"}
+]
+```
+
+Then fetch only shortlisted UIDs:
+
+```json
+{
+  "name": "fetch_email",
+  "arguments": {"mailbox": "AllMail", "uid": 12345}
+}
+```
+
+`scan_headers_range` is intentionally page-oriented. A response with `truncated: true` is not complete; resume with `cursor` or `nextBeforeUID`.
 
 ## Python Test Client
 

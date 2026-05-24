@@ -102,7 +102,18 @@ def main():
 
     call_tool("count_messages", {"mailbox": "AllMail"})
     call_tool("count_messages", {"mailbox": "INBOX"})
+    call_tool("mailbox_diagnostics", {"mailbox": "AllMail"})
     call_tool("sample_recent_headers", {"mailbox": "AllMail", "limit": 10})
+
+    call_tool(
+        "scan_headers_range",
+        {
+            "mailbox": "AllMail",
+            "startDate": "2026-05-01",
+            "limit": 100,
+            "uidWindow": 2000,
+        },
+    )
 
     call_tool(
         "search_since",

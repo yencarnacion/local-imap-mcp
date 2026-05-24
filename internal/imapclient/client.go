@@ -41,6 +41,35 @@ type MailboxCount struct {
 	UIDValidity uint32 `json:"uidValidity"`
 }
 
+type MailboxDiagnostics struct {
+	Mailbox          string   `json:"mailbox"`
+	Listed           bool     `json:"listed"`
+	Delimiter        string   `json:"delimiter,omitempty"`
+	Attrs            []string `json:"attrs,omitempty"`
+	StatusOK         bool     `json:"statusOK"`
+	StatusError      string   `json:"statusError,omitempty"`
+	SelectOK         bool     `json:"selectOK"`
+	SelectError      string   `json:"selectError,omitempty"`
+	Exists           uint32   `json:"exists"`
+	Messages         uint32   `json:"messages"`
+	Recent           uint32   `json:"recent"`
+	Unseen           *uint32  `json:"unseen,omitempty"`
+	UIDNext          uint32   `json:"uidNext"`
+	UIDValidity      uint32   `json:"uidValidity"`
+	HighestModSeq    uint64   `json:"highestModSeq,omitempty"`
+	Size             *int64   `json:"size,omitempty"`
+	Flags            []string `json:"flags,omitempty"`
+	PermanentFlags   []string `json:"permanentFlags,omitempty"`
+	FetchByUIDOK     bool     `json:"fetchByUIDOK"`
+	FetchByUID       uint32   `json:"fetchByUID,omitempty"`
+	FetchByUIDError  string   `json:"fetchByUIDError,omitempty"`
+	Empty            bool     `json:"empty"`
+	UsableForTriage  bool     `json:"usableForTriage"`
+	Healthy          bool     `json:"healthy"`
+	DiagnosticStatus string   `json:"diagnosticStatus"`
+	Warnings         []string `json:"warnings,omitempty"`
+}
+
 type MessageSummary struct {
 	UID          uint32   `json:"uid"`
 	Mailbox      string   `json:"mailbox"`
@@ -51,6 +80,10 @@ type MessageSummary struct {
 	InternalDate string   `json:"internalDate,omitempty"`
 	Size         int64    `json:"size,omitempty"`
 	SeqNum       uint32   `json:"seqNum,omitempty"`
+	Flags        []string `json:"flags,omitempty"`
+	MessageID    string   `json:"messageId,omitempty"`
+	InReplyTo    string   `json:"inReplyTo,omitempty"`
+	References   []string `json:"references,omitempty"`
 }
 
 func New(cfg *config.Config) *Client {
@@ -109,6 +142,114 @@ func (c *Client) CountMessages(mailbox string) (*MailboxCount, error) {
 		UIDNext:     uint32(data.UIDNext),
 		UIDValidity: data.UIDValidity,
 	}, nil
+}
+
+func (c *Client) MailboxDiagnostics(mailbox string) (*MailboxDiagnostics, error) {
+	mailbox = c.mailbox(mailbox)
+	diag := &MailboxDiagnostics{Mailbox: mailbox}
+
+	ic, err := c.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer closeClient(ic)
+
+	if listData, err := ic.List("", "*", nil).Collect(); err == nil {
+		for _, item := range listData {
+			if item.Mailbox != mailbox {
+				continue
+			}
+			diag.Listed = true
+			if item.Delim != 0 {
+				diag.Delimiter = string(item.Delim)
+			}
+			for _, attr := range item.Attrs {
+				diag.Attrs = append(diag.Attrs, string(attr))
+			}
+			break
+		}
+	} else {
+		diag.Warnings = append(diag.Warnings, "LIST failed: "+classifyIMAPError(err).Error())
+	}
+	if !diag.Listed {
+		diag.Warnings = append(diag.Warnings, "mailbox was not returned by LIST")
+	}
+
+	status, err := ic.Status(mailbox, &imap.StatusOptions{
+		NumMessages: true,
+		UIDNext:     true,
+		UIDValidity: true,
+		NumUnseen:   true,
+	}).Wait()
+	if err != nil {
+		diag.StatusError = classifyIMAPError(err).Error()
+		diag.Warnings = append(diag.Warnings, "STATUS failed: "+diag.StatusError)
+	} else {
+		diag.StatusOK = true
+		if status.NumMessages != nil {
+			diag.Messages = *status.NumMessages
+		}
+		diag.Unseen = status.NumUnseen
+		diag.UIDNext = uint32(status.UIDNext)
+		diag.UIDValidity = status.UIDValidity
+		diag.Size = status.Size
+	}
+
+	selectData, err := selectMailbox(ic, mailbox)
+	if err != nil {
+		diag.SelectError = classifyIMAPError(err).Error()
+		diag.Warnings = append(diag.Warnings, "SELECT failed: "+diag.SelectError)
+		finalizeDiagnostics(diag)
+		return diag, nil
+	}
+	diag.SelectOK = true
+	diag.Exists = selectData.NumMessages
+	diag.Messages = selectData.NumMessages
+	diag.Recent = selectData.NumRecent
+	diag.UIDNext = uint32(selectData.UIDNext)
+	diag.UIDValidity = selectData.UIDValidity
+	diag.HighestModSeq = selectData.HighestModSeq
+	diag.Flags = flagsToStrings(selectData.Flags)
+	diag.PermanentFlags = flagsToStrings(selectData.PermanentFlags)
+	diag.Empty = selectData.NumMessages == 0
+
+	if selectData.NumMessages == 0 {
+		diag.Warnings = append(diag.Warnings, "mailbox is selectable but empty")
+		finalizeDiagnostics(diag)
+		return diag, nil
+	}
+
+	sample, err := fetchSummariesBySeq(ic, mailbox, selectData.NumMessages, selectData.NumMessages)
+	if err != nil {
+		diag.FetchByUIDError = "sample latest message by sequence failed: " + err.Error()
+		diag.Warnings = append(diag.Warnings, diag.FetchByUIDError)
+		finalizeDiagnostics(diag)
+		return diag, nil
+	}
+	if len(sample) == 0 || sample[0].UID == 0 {
+		diag.FetchByUIDError = "latest sequence returned no UID"
+		diag.Warnings = append(diag.Warnings, diag.FetchByUIDError)
+		finalizeDiagnostics(diag)
+		return diag, nil
+	}
+
+	diag.FetchByUID = sample[0].UID
+	byUID, err := fetchSummaries(ic, mailbox, []imap.UID{imap.UID(sample[0].UID)})
+	if err != nil {
+		diag.FetchByUIDError = err.Error()
+		diag.Warnings = append(diag.Warnings, "UID fetch failed: "+diag.FetchByUIDError)
+		finalizeDiagnostics(diag)
+		return diag, nil
+	}
+	if len(byUID) == 0 {
+		diag.FetchByUIDError = "message not found when fetched by UID"
+		diag.Warnings = append(diag.Warnings, diag.FetchByUIDError)
+		finalizeDiagnostics(diag)
+		return diag, nil
+	}
+	diag.FetchByUIDOK = true
+	finalizeDiagnostics(diag)
+	return diag, nil
 }
 
 func (c *Client) FetchEmail(mailbox string, uid uint32) (*emailparse.Email, error) {
@@ -203,6 +344,33 @@ func closeClient(c *clientlib.Client) {
 	}
 	_ = c.Logout().Wait()
 	_ = c.Close()
+}
+
+func finalizeDiagnostics(diag *MailboxDiagnostics) {
+	diag.Empty = diag.SelectOK && diag.Exists == 0
+	diag.UsableForTriage = diag.SelectOK && !diag.Empty && diag.FetchByUIDOK
+	diag.Healthy = diag.StatusOK && diag.SelectOK && (diag.Empty || diag.FetchByUIDOK)
+
+	switch {
+	case !diag.SelectOK:
+		diag.DiagnosticStatus = "unusable: SELECT failed"
+	case diag.Empty:
+		diag.DiagnosticStatus = "empty: selectable mailbox has zero messages"
+	case !diag.FetchByUIDOK:
+		diag.DiagnosticStatus = "unusable: sample fetch by UID failed"
+	case !diag.StatusOK:
+		diag.DiagnosticStatus = "partial: SELECT and UID fetch work, STATUS failed"
+	default:
+		diag.DiagnosticStatus = "healthy"
+	}
+}
+
+func flagsToStrings(flags []imap.Flag) []string {
+	out := make([]string, 0, len(flags))
+	for _, flag := range flags {
+		out = append(out, string(flag))
+	}
+	return out
 }
 
 func classifyIMAPError(err error) error {

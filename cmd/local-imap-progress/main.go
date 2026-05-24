@@ -63,12 +63,12 @@ func collect(client *imapclient.Client, mailbox string) (*snapshot, error) {
 	}
 
 	var latest *imapclient.MessageSummary
-	headers, err := client.SampleRecentHeaders(mailbox, 1)
+	headerResult, err := client.SampleRecentHeaders(mailbox, 1)
 	if err != nil {
 		return nil, err
 	}
-	if len(headers) > 0 {
-		latest = &headers[0]
+	if len(headerResult.Results) > 0 {
+		latest = &headerResult.Results[0]
 	}
 
 	return &snapshot{
