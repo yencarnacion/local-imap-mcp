@@ -28,7 +28,7 @@ By default, this project is read-only. It does not delete, move, expunge, mark r
 - `search_body`
 - `mailbox_sync_health`
 
-`fetch_email` returns parsed text and HTML bodies plus attachment metadata only. Attachments are not saved.
+`fetch_email` requests the full IMAP `BODY[]` payload and returns parsed text and HTML bodies plus attachment metadata only. Attachments are not saved. It also returns `raw_size`, `rfc822_size`, `fetch_complete`, `body_truncated`, `text_body_bytes`, and `html_body_bytes` so callers can distinguish a complete fetch from client-side display truncation. Search snippets may contain leading or trailing `...`; `fetch_email` does not add ellipses to bodies.
 
 Search-style tools return an object with `results`, `returned`, `hasMore`, `truncated`, and `warnings`. If `maxResults` is omitted, the configured `imap.max_results` default is used. If `maxResults` is provided, that explicit value is honored for admin/reporting workflows.
 

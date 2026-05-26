@@ -103,6 +103,11 @@ type MessageSummary struct {
 	References   []string `json:"references,omitempty"`
 }
 
+type fetchedBody struct {
+	Body       []byte
+	RFC822Size int64
+}
+
 func New(cfg *config.Config) *Client {
 	return &Client{cfg: cfg}
 }
@@ -313,7 +318,17 @@ func (c *Client) FetchEmail(mailbox string, uid uint32) (*emailparse.Email, erro
 	if err != nil {
 		return nil, err
 	}
-	return emailparse.Parse(raw, uid, mailbox)
+	email, err := emailparse.Parse(raw.Body, uid, mailbox)
+	if err != nil {
+		return nil, err
+	}
+	email.RawSize = int64(len(raw.Body))
+	email.RFC822Size = raw.RFC822Size
+	email.FetchComplete = raw.RFC822Size == 0 || int64(len(raw.Body)) >= raw.RFC822Size
+	email.BodyTruncated = raw.RFC822Size > 0 && int64(len(raw.Body)) < raw.RFC822Size
+	email.TextBodyBytes = len(email.TextBody)
+	email.HTMLBodyBytes = len(email.HTMLBody)
+	return email, nil
 }
 
 func (c *Client) GetHeaders(mailbox string, uid uint32) (map[string][]string, error) {
@@ -324,10 +339,10 @@ func (c *Client) GetHeaders(mailbox string, uid uint32) (map[string][]string, er
 	if err != nil {
 		return nil, err
 	}
-	return emailparse.Headers(raw)
+	return emailparse.Headers(raw.Body)
 }
 
-func (c *Client) fetchBody(mailbox string, uid uint32, section imap.FetchItemBodySection) ([]byte, error) {
+func (c *Client) fetchBody(mailbox string, uid uint32, section imap.FetchItemBodySection) (*fetchedBody, error) {
 	ic, err := c.connect()
 	if err != nil {
 		return nil, err
@@ -339,6 +354,7 @@ func (c *Client) fetchBody(mailbox string, uid uint32, section imap.FetchItemBod
 	}
 	options := &imap.FetchOptions{
 		UID:         true,
+		RFC822Size:  true,
 		BodySection: []*imap.FetchItemBodySection{&section},
 	}
 	messages, err := ic.Fetch(imap.UIDSetNum(imap.UID(uid)), options).Collect()
@@ -352,7 +368,7 @@ func (c *Client) fetchBody(mailbox string, uid uint32, section imap.FetchItemBod
 	if body == nil {
 		return nil, ErrMessageNotFound
 	}
-	return body, nil
+	return &fetchedBody{Body: body, RFC822Size: messages[0].RFC822Size}, nil
 }
 
 func (c *Client) connect() (*clientlib.Client, error) {

@@ -19,17 +19,23 @@ type Attachment struct {
 }
 
 type Email struct {
-	UID         uint32       `json:"uid"`
-	Mailbox     string       `json:"mailbox"`
-	Subject     string       `json:"subject"`
-	From        []string     `json:"from"`
-	To          []string     `json:"to"`
-	CC          []string     `json:"cc"`
-	Date        string       `json:"date"`
-	MessageID   string       `json:"message_id"`
-	TextBody    string       `json:"text_body"`
-	HTMLBody    string       `json:"html_body"`
-	Attachments []Attachment `json:"attachments"`
+	UID           uint32       `json:"uid"`
+	Mailbox       string       `json:"mailbox"`
+	Subject       string       `json:"subject"`
+	From          []string     `json:"from"`
+	To            []string     `json:"to"`
+	CC            []string     `json:"cc"`
+	Date          string       `json:"date"`
+	MessageID     string       `json:"message_id"`
+	RawSize       int64        `json:"raw_size"`
+	RFC822Size    int64        `json:"rfc822_size,omitempty"`
+	FetchComplete bool         `json:"fetch_complete"`
+	BodyTruncated bool         `json:"body_truncated"`
+	TextBodyBytes int          `json:"text_body_bytes"`
+	HTMLBodyBytes int          `json:"html_body_bytes"`
+	TextBody      string       `json:"text_body"`
+	HTMLBody      string       `json:"html_body"`
+	Attachments   []Attachment `json:"attachments"`
 }
 
 func Parse(raw []byte, uid uint32, mailboxName string) (*Email, error) {

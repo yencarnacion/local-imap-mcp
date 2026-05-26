@@ -94,9 +94,16 @@ Main requirements:
      cc
      date
      message_id
+     raw_size
+     rfc822_size
+     fetch_complete
+     body_truncated
+     text_body_bytes
+     html_body_bytes
      text_body
      html_body
      attachments metadata only
+   The fetch_email tool requests full IMAP BODY[] and must not synthesize trailing ellipses in body fields.
    Do not save attachments yet.
 
    get_email_headers:
